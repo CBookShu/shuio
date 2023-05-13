@@ -3,10 +3,10 @@
 
 #include <Windows.h>
 #include <iostream>
-#include "shu_loop.h"
-#include "shu_server.h"
-#include "shu_stream.h"
-#include "shu_buffer.h"
+#include "shuio/shu_loop.h"
+#include "shuio/shu_server.h"
+#include "shuio/shu_stream.h"
+#include "shuio/shu_buffer.h"
 #include <queue>
 #include <chrono>
 #include <format>

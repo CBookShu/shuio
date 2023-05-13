@@ -3,9 +3,20 @@ add_rules("mode.debug", "mode.release")
 set_languages("c++20")
 
 target("shuio")
+    set_kind("static")
+    add_includedirs("$(projectdir)", {public = true})
+    add_files("shuio/*.cpp")
+    if is_os("windows") then
+        add_files("shuio/win32/*.cpp")
+    elseif is_os("linux") then
+        add_files("shuio/unix/*.cpp")
+    else
+        assert(false, "not support")
+    end
+target("example")
     set_kind("binary")
-    add_files("src/*.cpp")
-
+    add_deps("shuio")
+    add_files("example/*.cpp")
 --
 -- If you want to known more usage about xmake, please see https://xmake.io
 --

@@ -1,8 +1,8 @@
-#include "shu_stream.h"
+#include "shuio/shu_stream.h"
 #include "win32_detail.h"
-#include "shu_loop.h"
-#include "shu_socket.h"
-#include "shu_buffer.h"
+#include "shuio/shu_loop.h"
+#include "shuio/shu_socket.h"
+#include "shuio/shu_buffer.h"
 #include <vector>
 #include <atomic>
 

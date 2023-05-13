@@ -1,7 +1,7 @@
-#include "shu_server.h"
+#include "shuio/shu_server.h"
 #include "win32_detail.h"
-#include "shu_loop.h"
-#include "shu_socket.h"
+#include "shuio/shu_loop.h"
+#include "shuio/shu_socket.h"
 #include <cassert>
 
 namespace shu {

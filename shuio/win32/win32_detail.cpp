@@ -1,6 +1,6 @@
 #include "win32_detail.h"
-#include "shu_loop.h"
-#include "shu_socket.h"
+#include "shuio/shu_loop.h"
+#include "shuio/shu_socket.h"
 
 namespace shu {
     auto shu::wsa_cast_sloop(sloop* s) -> iocp_navite_t*
