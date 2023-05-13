@@ -7,13 +7,13 @@ namespace shu {
 
 	struct sstream_opt {
 		addr_pair_t addr;
-		// 读写缓存buffer上限
+		// 璇诲啓缂撳瓨buffer涓婇檺
 		std::size_t read_buffer_limit = 1024 * 1024 * 20;
 		std::size_t write_buffer_limit = 1024 * 1024 * 20;
-		// 读写缓存初始大小
+		// 璇诲啓缂撳瓨鍒濆澶у皬
 		std::size_t read_buffer_init = 4096;
 		std::size_t write_buffer_init = 4096;
-		// 每次读的大小
+		// 姣忔璇荤殑澶у皬
 		std::size_t read_buffer_count_per_op = 4096;
 	};
 

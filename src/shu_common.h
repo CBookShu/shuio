@@ -22,8 +22,8 @@ namespace shu {
 	}addr_pair_t;
 
 	typedef struct socket_io_result_t {
-		std::uint32_t bytes;		// ±¾´Î²Ù×÷µÄbytes
-		std::int32_t err;		// ±¾´Î²Ù×÷ÊÇ·ñÓĞ´íÎó0 ÎŞ´íÎó
+		std::uint32_t bytes;		// æœ¬æ¬¡æ“ä½œçš„bytes
+		std::int32_t err;		// æœ¬æ¬¡æ“ä½œæ˜¯å¦æœ‰é”™è¯¯0 æ— é”™è¯¯
 		std::int32_t naviteerr;	// win: wsagetlasterror, unix:errno
 	}socket_io_result;
 

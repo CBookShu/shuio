@@ -54,14 +54,14 @@ namespace shu {
 					runs.push_back(it.second);
 				}
 			}
-			// !! ÕâÀïÄÄÅÂrunsÊÇ¿ÕµÄ£¬Ò²ÒªÖØĞÂÔÙ¶¨Ê±Ò»´Î£¡
-			// ÒòÎªtimerµÄ¶¨Ê±Æ÷ºÍnowµÄÅĞ¶ÏÎ´±ØÄÇÃ´×¼È·£¡
+			// !! è¿™é‡Œå“ªæ€•runsæ˜¯ç©ºçš„ï¼Œä¹Ÿè¦é‡æ–°å†å®šæ—¶ä¸€æ¬¡ï¼
+			// å› ä¸ºtimerçš„å®šæ—¶å™¨å’Œnowçš„åˆ¤æ–­æœªå¿…é‚£ä¹ˆå‡†ç¡®ï¼
 			timers.erase(timers.begin(), e);
 			for (auto& r : runs) {
 				r->run();
 				r->destroy();
 			}
-			// ÖØĞÂ¶¨Ê±
+			// é‡æ–°å®šæ—¶
 			_set_timer(now);
 		}
 		void stop_timer() {
@@ -206,7 +206,7 @@ namespace shu {
 
 		_loop->timer.max_expired_time = _loop->opt.max_expired_time;
 		_loop->timer.start_timer([this]() {
-			// ¶¨Ê±Æ÷µ½ÁËĞèÒª´¥·¢iocpÑ­»·
+			// å®šæ—¶å™¨åˆ°äº†éœ€è¦è§¦å‘iocpå¾ªç¯
 			::PostQueuedCompletionStatus(_loop->iocp, 0, reinterpret_cast<ULONG_PTR>(&g_timer_op), nullptr);
 		}, _loop->opt.max_expired_time);
 		
@@ -216,7 +216,7 @@ namespace shu {
 			ULONG count;
 			auto r = ::GetQueuedCompletionStatusEx(_loop->iocp, overlappeds, _countof(overlappeds), &count, INFINITE, false);
 			if (!r) {
-				// »áÓĞÊ²Ã´´íÎóÃ´?
+				// ä¼šæœ‰ä»€ä¹ˆé”™è¯¯ä¹ˆ?
 				auto e = WSAGetLastError();
 				continue;
 			}
@@ -227,7 +227,7 @@ namespace shu {
 
 			for (std::size_t i = 0; i < count; ++i) {
 				if (overlappeds[i].lpOverlapped) {
-					// Í¶µİÁËÍê³ÉÊÂ¼ş¼´: socket²Ù×÷
+					// æŠ•é€’äº†å®Œæˆäº‹ä»¶å³: socketæ“ä½œ
 					auto* op = reinterpret_cast<iocp_sock_callback*>(overlappeds[i].lpCompletionKey);
 					op->run(overlappeds + i);
 				}
@@ -237,7 +237,7 @@ namespace shu {
 			}
 			for (std::size_t i = 0; i < pos; ++i) {
 				auto* op = reinterpret_cast<sloop_runable*>(overlappeds[pure_idx[i]].lpCompletionKey);
-				// ´¿´âµÄop²Ù×÷
+				// çº¯ç²¹çš„opæ“ä½œ
 				if (op) {
 					op->run();
 					op->destroy();
@@ -256,7 +256,7 @@ namespace shu {
 			}
 		}
 
-		// ÇåÀíËùÓĞµÄop
+		// æ¸…ç†æ‰€æœ‰çš„op
 		for (;;) {
 			OVERLAPPED_ENTRY overlappeds[128];
 			ULONG count;
@@ -267,18 +267,18 @@ namespace shu {
 					// all ok
 					break;
 				}
-				// Èç¹ûÕæµÄ³ö´íÁË£¬ÕâÀïÓĞ¿ÉÄÜ»áĞ¹Â©opµÄÄÚ´æ£¡
-				// TODO: ÊÇ·ñĞèÒªÔÙ´Î½øĞĞget Ö±µ½timeout?
+				// å¦‚æœçœŸçš„å‡ºé”™äº†ï¼Œè¿™é‡Œæœ‰å¯èƒ½ä¼šæ³„æ¼opçš„å†…å­˜ï¼
+				// TODO: æ˜¯å¦éœ€è¦å†æ¬¡è¿›è¡Œget ç›´åˆ°timeout?
 				break;
 			}
 			for (ULONG i = 0; i < count; ++i) {
 				if (!overlappeds[i].lpOverlapped) {
 					auto* op = reinterpret_cast<sloop_runable*>(overlappeds[i].lpCompletionKey);
-					// ²»ÔÙÖ´ĞĞ£¬Ö±½ÓÅ×Æúµô£¡
+					// ä¸å†æ‰§è¡Œï¼Œç›´æ¥æŠ›å¼ƒæ‰ï¼
 					op->destroy();
 				}
 				else {
-					// socket op ²»ÔÙ²Ù×÷£¡
+					// socket op ä¸å†æ“ä½œï¼
 				}
 			}
 		}

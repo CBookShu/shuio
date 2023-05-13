@@ -15,8 +15,8 @@ namespace shu {
 	constexpr auto ms_1 = std::chrono::milliseconds(1);
 
 	struct sloop_opt {
-		// ³¬¹ı¸ÃÅäÖÃ·ÖÖÓµÄ¶¨Ê±Æ÷£¬°´ÕÕÕâ¸öÖµ½øĞĞÉèÖÃ
-		micsec_t max_expired_time = sec_t(5);	// Ä¬ÈÏ5·ÖÖÓ
+		// è¶…è¿‡è¯¥é…ç½®åˆ†é’Ÿçš„å®šæ—¶å™¨ï¼ŒæŒ‰ç…§è¿™ä¸ªå€¼è¿›è¡Œè®¾ç½®
+		micsec_t max_expired_time = minute_t(5);	// é»˜è®¤5åˆ†é’Ÿ
 	};
 	struct sloop_runable;
 	struct sloop_timer_t_id{

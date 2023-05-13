@@ -59,7 +59,7 @@ namespace shu {
 		void post_read() {
 			assert(!reading);
 			if (stop.load()) {
-				// ½«²»ÔÙĞøÉÏstreamµÄÉùÃ÷ÖÜÆÚ
+				// å°†ä¸å†ç»­ä¸Šstreamçš„å£°æ˜å‘¨æœŸ
 				return;
 			}
 
@@ -82,7 +82,7 @@ namespace shu {
 				auto e = WSAGetLastError();
 				assert(r != SOCKET_ERROR || WSA_IO_PENDING == e);
 				if (r == SOCKET_ERROR && WSA_IO_PENDING != e) [[unlikely]] {
-					// ĞèÒª½øĞĞ´íÎóÍ¶µİ£¡
+					// éœ€è¦è¿›è¡Œé”™è¯¯æŠ•é€’ï¼
 					rd_complete->hold.reset();
 					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
 					cb->on_read(res, _s.get());
@@ -125,7 +125,7 @@ namespace shu {
 				auto e = WSAGetLastError();
 				assert(r != SOCKET_ERROR || WSA_IO_PENDING == e);
 				if (r == SOCKET_ERROR && WSA_IO_PENDING != e) [[unlikely]] {
-					// ĞèÒª½øĞĞ´íÎóÍ¶µİ£¡
+					// éœ€è¦è¿›è¡Œé”™è¯¯æŠ•é€’ï¼
 					wt_complete->hold.reset();
 					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
 					cb->on_write(res, _s.get());
@@ -161,11 +161,11 @@ namespace shu {
 					total -= buf->consume(total);
 					auto ready = buf->ready();
 					if (ready.size() > 0) {
-						// Ã»ÓĞĞ´Íæ? 
-						// Ò»°ãÀ´Ëµwrite ÔÚsocket ´°¿Ú»º´æ³¬³öµÄÊ±ºò£¬»áĞ´ÈëÊ§°Ü
+						// æ²¡æœ‰å†™ç©? 
+						// ä¸€èˆ¬æ¥è¯´write åœ¨socket çª—å£ç¼“å­˜è¶…å‡ºçš„æ—¶å€™ï¼Œä¼šå†™å…¥å¤±è´¥
 						break;
 					}
-					delete buf;	// ÌáÇ°ÊÍ·Åµô
+					delete buf;	// æå‰é‡Šæ”¾æ‰
 					do_erase = true;
 					eraseit = it;
 				}
@@ -173,7 +173,7 @@ namespace shu {
 					wt_bufs.erase(wt_bufs.begin(), eraseit + 1);
 				}
 				if (!wt_bufs.empty()) {
-					// ¼ÌĞøÍê³ÉÎ´Íê³ÉµÄĞ´ÈëÊÂÒµ£¡
+					// ç»§ç»­å®Œæˆæœªå®Œæˆçš„å†™å…¥äº‹ä¸šï¼
 					post_write(nullptr);
 				}
 			}

@@ -70,7 +70,7 @@ namespace shu {
 			data->pos = 0;
 		}
 		else {
-			// �ڴ治��?
+			// 内存不足?
 			::abort();
 		}
 	}

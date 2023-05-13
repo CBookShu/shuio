@@ -49,7 +49,7 @@ namespace shu {
 		}
 
 		void post_acceptor(acceptor_complete_t* complete) {
-			// iocp ¿ÉÒÔÖ§³ÖÒ»´ÎĞÔÍ¶µİ¶à¸öacceptor£¬ÕâÀïµÄÊ¾·¶×öÁË4¸ö£¡
+			// iocp å¯ä»¥æ”¯æŒä¸€æ¬¡æ€§æŠ•é€’å¤šä¸ªacceptorï¼Œè¿™é‡Œçš„ç¤ºèŒƒåšäº†4ä¸ªï¼
 			complete->sock = new ssocket({});
 			complete->sock->init(server->option()->addr.iptype);
 			
@@ -61,7 +61,7 @@ namespace shu {
 				auto e = WSAGetLastError();
 				assert(e == ERROR_IO_PENDING);
 				if (e != ERROR_IO_PENDING) {
-					// TODO: Ò»µ©×ßµ½ÕâÀï£¬¾Í´ú±íÖØ´ó¹ÊÕÏ£¡¿¼ÂÇÊÇ·ñÔö¼ÓÖØÊÔ?
+					// TODO: ä¸€æ—¦èµ°åˆ°è¿™é‡Œï¼Œå°±ä»£è¡¨é‡å¤§æ•…éšœï¼è€ƒè™‘æ˜¯å¦å¢åŠ é‡è¯•?
 					complete->sock;
 					complete = nullptr;
 					socket_io_result_t res{ .err = 1, .naviteerr = s_last_error() };
@@ -76,8 +76,8 @@ namespace shu {
 			SOCKADDR_IN* LocalAddr = NULL;
 			int remoteLen = sizeof(SOCKADDR_IN), localLen = sizeof(SOCKADDR_IN);
 
-			// TODO: ÕâÀï¿ÉÒÔÓÅ»¯½«µÚÒ»¸ö°üºÍacceptÒ»²¢»ñÈ¡µ½£¡
-			// ÎÒ¾ÍÏ²»¶ÕâÑùµÄapi£¬Ã»ÓĞ·µ»ØÖµ£¡ Ò»¶¨³É¹¦£¡
+			// TODO: è¿™é‡Œå¯ä»¥ä¼˜åŒ–å°†ç¬¬ä¸€ä¸ªåŒ…å’Œacceptä¸€å¹¶è·å–åˆ°ï¼
+			// æˆ‘å°±å–œæ¬¢è¿™æ ·çš„apiï¼Œæ²¡æœ‰è¿”å›å€¼ï¼ ä¸€å®šæˆåŠŸï¼
 			lpfnGetAcceptExSockAddrs(complete->buffer, 0,
 				sizeof(SOCKADDR_IN) + 16, sizeof(SOCKADDR_IN) + 16,
 				(LPSOCKADDR*)&LocalAddr, &localLen,
@@ -191,7 +191,7 @@ namespace shu {
 			return false;
 		}
 
-		// Èç¹ûÊÇudp ÄÇ¾Í²»ĞèÒªaccept,Ö±½Óstream»ñÈ¡Êı¾İÁË
+		// å¦‚æœæ˜¯udp é‚£å°±ä¸éœ€è¦accept,ç›´æ¥streamè·å–æ•°æ®äº†
 		_s->op->init();
 		return true;
 	}

@@ -33,7 +33,7 @@ namespace shu {
 		auto option() -> const ssocket_opt*;
 		auto noblock(bool) -> bool;
 		auto reuse_addr(bool) -> bool;
-		auto reuse_port(bool) -> bool;	// win32 Ó¦¸ÃÊÇ²»Ö§³ÖµÄ
+		auto reuse_port(bool) -> bool;	// win32 åº”è¯¥æ˜¯ä¸æ”¯æŒçš„
 		auto nodelay(bool) -> bool;
 	};
 };
