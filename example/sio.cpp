@@ -67,9 +67,7 @@ void start_server() {
 void start_timer() {
     sloop l({});
 
-    cout << shu::systime_t::now() << endl;
     l.add_timer_f([&l]() {
-        cout << shu::systime_t::now() << endl;
         l.stop();
     }, 5s);
     l.add_timer_f([&l]() {
