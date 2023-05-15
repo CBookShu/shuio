@@ -71,14 +71,16 @@ void start_timer() {
         l.stop();
     }, 5s);
     l.add_timer_f([&l]() {
-        l.stop();
-    }, 2s);
+        l.add_timer_f([&l]() {
+            l.stop();
+        }, 2s);
+    }, 1s);
     l.run();
 }
 
 int main()
 {
-    start_server();
+    start_timer();
     return 0;
 }
 

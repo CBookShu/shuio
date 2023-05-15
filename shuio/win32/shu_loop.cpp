@@ -183,11 +183,14 @@ namespace shu {
 		id.id = _loop->timer.timer_get_seq();
 		id.expire = now + time;
 
-		auto ret = dispatch_f([now, id, time, r, this]() {
-			_loop->timer.timer_add(now, id, r);
+		auto deletor_f = [](auto* t) {
+			t->destroy(); 
+		};
+		std::unique_ptr<sloop_runable, decltype(deletor_f)> uptr_r(r, deletor_f);
+		auto ret = dispatch_f([now, id, time, this, uptr_r = std::move(uptr_r)]()mutable{
+			_loop->timer.timer_add(now, id, uptr_r.release());
 		});
 		if (!ret) {
-			r->destroy();
 			return {};
 		}
 		return id;
