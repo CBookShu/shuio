@@ -27,7 +27,6 @@ namespace shu {
 				timeout.QuadPart = duration_cast<nasec_t>(diff).count() / 100;
 				// QuadPart的单位是100纳秒
 				timeout.QuadPart = -std::max<LONGLONG>(timeout.QuadPart, 10000);
-				std::cout << "QuadPart: " << timeout.QuadPart << std::endl;
 				auto ms = duration_cast<milsec_t>(max_expired_time);
 				LONG p = static_cast<LONG>(ms.count());
 				::SetWaitableTimer(win32_timer_handle,
