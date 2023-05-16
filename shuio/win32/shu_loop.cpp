@@ -22,9 +22,14 @@ namespace shu {
 			expire = timer_min_expire(expire);
 			auto diff = duration_cast<micsec_t>(expire - now);
 			if (first || diff < max_expired_time) {
+				// 等待的最小单位是1ms
 				LARGE_INTEGER timeout{};
 				timeout.QuadPart = duration_cast<nasec_t>(diff).count() / 100;
-				LONG p = static_cast<LONG>(max_expired_time.count());
+				// QuadPart的单位是100纳秒
+				timeout.QuadPart = -std::max<LONGLONG>(timeout.QuadPart, 10000);
+				std::cout << "QuadPart: " << timeout.QuadPart << std::endl;
+				auto ms = duration_cast<milsec_t>(max_expired_time);
+				LONG p = static_cast<LONG>(ms.count());
 				::SetWaitableTimer(win32_timer_handle,
 					&timeout, p, 0, 0, FALSE);
 			}
