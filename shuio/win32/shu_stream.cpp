@@ -70,7 +70,7 @@ namespace shu {
 				// udp
 			}
 			else {
-				auto sock = wsa_cast_ssocket(_s->sock());
+				auto sock = navite_cast_ssocket(_s->sock());
 				auto s = rd_buf->prepare(_s->option()->read_buffer_count_per_op);
 				WSABUF buf;
 				buf.buf = s.data();
@@ -109,7 +109,7 @@ namespace shu {
 				// udp
 			}
 			else {
-				auto sock = wsa_cast_ssocket(_s->sock());
+				auto sock = navite_cast_ssocket(_s->sock());
 				std::vector<WSABUF> buffs(wt_bufs.size());
 				std::size_t pos = 0;
 				for (auto& it : wt_bufs) {
@@ -247,7 +247,7 @@ namespace shu {
 		_s->op->ss = this->weak_from_this();
 		_s->op->cb = sr;
 		// this call will fail?
-		wsa_attach_iocp(_s->loop, _s->sock, _s->op);
+		navite_attach_iocp(_s->loop, _s->sock, _s->op);
 		_s->op->init();
 	}
 
@@ -273,7 +273,7 @@ namespace shu {
 		
 		auto self = shared_from_this();
 		_s->loop->post(new ioloop_functor([self, this]() mutable {
-			auto sock = wsa_cast_ssocket(_s->sock);
+			auto sock = navite_cast_ssocket(_s->sock);
 			::CancelIoEx((HANDLE)sock->s, _s->op->rd_complete);
 			_s->op->rd_complete->hold.reset();
 			::CancelIoEx((HANDLE)sock->s, _s->op->wt_complete);

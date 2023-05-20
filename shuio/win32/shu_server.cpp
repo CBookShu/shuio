@@ -40,7 +40,7 @@ namespace shu {
 		}
 
 		void init() {
-			wsa_attach_iocp(server->loop(), server->sock(), this);
+			navite_attach_iocp(server->loop(), server->sock(), this);
 
 			for (std::size_t i = 0; i < std::size(completes); ++i) {
 				completes[i] = new acceptor_complete_t{};
@@ -53,8 +53,8 @@ namespace shu {
 			complete->sock = new ssocket({});
 			complete->sock->init(server->option()->addr.iptype);
 			
-			auto* client_sock = wsa_cast_ssocket(complete->sock);
-			auto* server_sock = wsa_cast_ssocket(server->sock());
+			auto* client_sock = navite_cast_ssocket(complete->sock);
+			auto* server_sock = navite_cast_ssocket(server->sock());
 			DWORD bytes_read = 0;
 			auto r = lpfnAcceptEx(server_sock->s, client_sock->s, complete->buffer, 0, sizeof(sockaddr) + 16, sizeof(sockaddr) + 16, &bytes_read, complete);
 			if (!r) {
@@ -147,7 +147,7 @@ namespace shu {
 		_s->op = new socket_accptor_op{ this };
 		_s->op->creator = creator;
 
-		auto* server_sock = wsa_cast_ssocket(_s->sock);
+		auto* server_sock = navite_cast_ssocket(_s->sock);
 		DWORD dwBytes;
 		GUID GuidAcceptEx = WSAID_ACCEPTEX;
 		auto iResult = WSAIoctl(server_sock->s, SIO_GET_EXTENSION_FUNCTION_POINTER,

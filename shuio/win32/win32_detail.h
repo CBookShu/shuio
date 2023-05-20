@@ -19,10 +19,10 @@ namespace shu {
 	};
 
 	class sloop;
-	auto wsa_cast_sloop(sloop*) -> iocp_navite_t*;
+	auto navite_cast_loop(sloop*) -> iocp_navite_t*;
 	class ssocket;
-	auto wsa_cast_ssocket(ssocket*) -> sock_navite_t*;
+	auto navite_cast_ssocket(ssocket*) -> sock_navite_t*;
 
-	auto wsa_attach_iocp(sloop*, ssocket*, void*) -> bool;
+	auto navite_attach_iocp(sloop*, ssocket*, void*) -> bool;
 };
 
