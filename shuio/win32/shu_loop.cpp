@@ -143,6 +143,7 @@ namespace shu {
 
 	sloop::~sloop()
 	{
+		if(!_loop)	return;
 		if (_loop->iocp != INVALID_HANDLE_VALUE) {
 			::CloseHandle(_loop->iocp);
 		}

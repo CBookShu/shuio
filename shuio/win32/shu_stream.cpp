@@ -198,6 +198,7 @@ namespace shu {
 
 	sstream::~sstream()
 	{
+		if(!_s)	return;
 		if (_s->op) {
 			if (_s->op->cb) {
 				_s->op->cb->on_close(this);

@@ -112,6 +112,7 @@ namespace shu {
 
 	sserver::~sserver()
 	{
+		if(!_s) return;
 		if (_s->sock) {
 			delete _s->sock;
 		}

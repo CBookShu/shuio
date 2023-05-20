@@ -36,6 +36,7 @@ namespace shu {
 
 	ssocket::~ssocket()
 	{
+		if(!_ss) return;
 		if (_ss->s != INVALID_SOCKET) {
 			::shutdown(_ss->s, SD_BOTH);
 			::closesocket(_ss->s);
