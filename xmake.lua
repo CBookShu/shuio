@@ -9,14 +9,19 @@ target("shuio")
     if is_os("windows") then
         add_files("shuio/win32/*.cpp")
     elseif is_os("linux") then
-        add_files("shuio/unix/*.cpp")
+        add_links("uring")
+        add_files("shuio/linux/*.cpp")
     else
         assert(false, "not support")
     end
 target("example")
     set_kind("binary")
     add_deps("shuio")
-    add_files("example/*.cpp")
+    if is_os("windows") then
+        add_files("example/sio.cpp")
+    elseif is_os("linux") then
+        add_files("example/linux_test.cpp")
+    end
 --
 -- If you want to known more usage about xmake, please see https://xmake.io
 --
