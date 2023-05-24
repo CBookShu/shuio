@@ -30,9 +30,19 @@ static void sloop_test() {
     sloop_opt opt{};
     sloop loop{opt};
     
-    loop.post_f([&](){
-        loop.stop();
-    });
+    auto now = systime_t::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
+    std::cout << std::ctime(&now_c) << std::endl;
+    loop.add_timer_f([](){
+        auto now = systime_t::now();
+        auto now_c = std::chrono::system_clock::to_time_t(now);
+        std::cout << std::ctime(&now_c) << std::endl;
+    }, 1s);
+    loop.add_timer_f([](){
+        auto now = systime_t::now();
+        auto now_c = std::chrono::system_clock::to_time_t(now);
+        std::cout << std::ctime(&now_c) << std::endl;
+    }, 10s);
     loop.run();
 }
 

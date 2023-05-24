@@ -2,6 +2,7 @@
 #include <liburing.h>
 #include <sys/socket.h>
 #include <cstdint>
+#include <mutex>
 
 
 namespace shu {
@@ -12,10 +13,10 @@ namespace shu {
 
     typedef struct uring_navite_t {
         struct io_uring ring;
+        std::mutex sqe_mutex;
     }uring_navite_t;
     
     enum class op_type : __u8 {
-        type_stop,
         type_io,
         type_run
     };
@@ -42,4 +43,16 @@ namespace shu {
 
     class sloop;
     auto navite_cast_sloop(sloop*) -> uring_navite_t*;
+
+    auto io_uring_push_sqe(sloop* sl, auto&& f) -> bool {
+        auto* l = navite_cast_sloop(sl);
+        std::scoped_lock guard(l->sqe_mutex);
+        f(&l->ring);
+    }
+
+    static void msec_to_ts(struct __kernel_timespec *ts, unsigned int msec)
+    {
+        ts->tv_sec = msec / 1000;
+        ts->tv_nsec = (msec % 1000) * 1000000;
+    }
 }
