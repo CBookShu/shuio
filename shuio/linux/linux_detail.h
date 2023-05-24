@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <cstdint>
 #include <mutex>
+#include <chrono>
 
 
 namespace shu {
@@ -14,6 +15,7 @@ namespace shu {
     typedef struct uring_navite_t {
         struct io_uring ring;
         std::mutex sqe_mutex;
+        int efd;        // epoll fd
     }uring_navite_t;
     
     enum class op_type : __u8 {
@@ -50,8 +52,10 @@ namespace shu {
         f(&l->ring);
     }
 
-    static void msec_to_ts(struct __kernel_timespec *ts, unsigned int msec)
+    static void msec_to_ts(struct __kernel_timespec *ts, auto dur)
     {
+        auto milsec = std::chrono::duration_cast<std::chrono::milliseconds>(dur);
+        auto msec = milsec.count();
         ts->tv_sec = msec / 1000;
         ts->tv_nsec = (msec % 1000) * 1000000;
     }

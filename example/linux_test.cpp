@@ -33,16 +33,19 @@ static void sloop_test() {
     auto now = systime_t::now();
     auto now_c = std::chrono::system_clock::to_time_t(now);
     std::cout << std::ctime(&now_c) << std::endl;
-    loop.add_timer_f([](){
-        auto now = systime_t::now();
-        auto now_c = std::chrono::system_clock::to_time_t(now);
-        std::cout << std::ctime(&now_c) << std::endl;
-    }, 1s);
-    loop.add_timer_f([](){
+
+    auto id10 = loop.add_timer_f([](){
         auto now = systime_t::now();
         auto now_c = std::chrono::system_clock::to_time_t(now);
         std::cout << std::ctime(&now_c) << std::endl;
     }, 10s);
+    loop.add_timer_f([&](){
+        auto now = systime_t::now();
+        auto now_c = std::chrono::system_clock::to_time_t(now);
+        std::cout << std::ctime(&now_c) << std::endl;
+        loop.cancel_timer(id10);
+    }, 1s);
+
     loop.run();
 }
 

@@ -35,7 +35,7 @@ namespace shu {
             diff = std::min<>(diff, loop->handle()->opt.max_expired_time);
             io_uring_push_sqe(loop, [&,this](io_uring* u){
                 struct __kernel_timespec ts;
-                msec_to_ts(&ts, duration_cast<milsec_t>(diff).count());
+                msec_to_ts(&ts, diff);
                 auto* sqe = io_uring_get_sqe(u);
                 io_uring_sqe_set_data(sqe, &g_timer);
                 if(create) {
@@ -123,17 +123,13 @@ namespace shu {
         local_timer timer;
         std::thread::id cid;
         std::atomic_uint64_t seq;
-
-        int efd;        // epoll fd
-        int pipes[2];   // 用于通讯的pipes
-        // timer todo
     };
 
     static bool _init_io_uring(sloop *loop) {
         auto* _loop = loop->handle();
         auto depths = {2048, 1024, 512, 256, 128};
         for(auto& d:depths) {
-            auto r = io_uring_queue_init(d, &_loop->ring, 0);
+            auto r = io_uring_queue_init(d, &_loop->ring, IORING_SETUP_IOPOLL);
             if(r < 0) {
                 continue;
             }
@@ -151,8 +147,6 @@ namespace shu {
         assert(ok);
         _loop->efd = ::epoll_create1(0);
         assert(_loop->efd >= 0);
-        auto ret = ::pipe(_loop->pipes);
-        assert(ret >= 0);
         _loop->timer.loop = this;
     }
     sloop::sloop(sloop&& other) noexcept {
@@ -166,8 +160,6 @@ namespace shu {
             io_uring_queue_exit(&_loop->ring);
         }
         close(_loop->efd);
-        close(_loop->pipes[0]);
-        close(_loop->pipes[1]);
         delete _loop;
     }
 
@@ -251,7 +243,7 @@ namespace shu {
                         ud_ptr->cb->run(cqe);
                     } else if(ud->type == op_type::type_run) {
                         uring_ud_run_t* ud_ptr = static_cast<uring_ud_run_t*>(ud);
-                        auto finally = S_DEFER(ud_ptr->cb->destroy(););
+                        auto finally = S_DEFER(ud_ptr->cb->destroy();delete ud_ptr;);
                         ud_ptr->cb->run();
                     }   
                 }
