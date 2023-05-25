@@ -129,7 +129,8 @@ namespace shu {
         auto* _loop = loop->handle();
         auto depths = {2048, 1024, 512, 256, 128};
         for(auto& d:depths) {
-            auto r = io_uring_queue_init(d, &_loop->ring, IORING_SETUP_IOPOLL);
+            // auto r = io_uring_queue_init(d, &_loop->ring, IORING_SETUP_IOPOLL);
+            auto r = io_uring_queue_init(d, &_loop->ring, 0);
             if(r < 0) {
                 continue;
             }
@@ -239,7 +240,7 @@ namespace shu {
                 } else {
                     if (ud->type == op_type::type_io) {
                         uring_ud_io_t* ud_ptr = static_cast<uring_ud_io_t*>(ud);
-                        auto finally = S_DEFER(delete ud_ptr;);
+                        // ud_ptr 生命周期，与io绑定，不归loop管理
                         ud_ptr->cb->run(cqe);
                     } else if(ud->type == op_type::type_run) {
                         uring_ud_run_t* ud_ptr = static_cast<uring_ud_run_t*>(ud);

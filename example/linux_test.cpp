@@ -1,5 +1,6 @@
 #include "shuio/shu_socket.h"
 #include "shuio/shu_loop.h"
+#include "shuio/shu_server.h"
 #include <cassert>
 #include <thread>
 
@@ -30,22 +31,18 @@ static void sloop_test() {
     sloop_opt opt{};
     sloop loop{opt};
     
-    auto now = systime_t::now();
-    auto now_c = std::chrono::system_clock::to_time_t(now);
-    std::cout << std::ctime(&now_c) << std::endl;
-
-    auto id10 = loop.add_timer_f([](){
-        auto now = systime_t::now();
-        auto now_c = std::chrono::system_clock::to_time_t(now);
-        std::cout << std::ctime(&now_c) << std::endl;
-    }, 10s);
-    loop.add_timer_f([&](){
-        auto now = systime_t::now();
-        auto now_c = std::chrono::system_clock::to_time_t(now);
-        std::cout << std::ctime(&now_c) << std::endl;
-        loop.cancel_timer(id10);
-    }, 1s);
-
+    sserver server({});
+    struct server_ctx : sserver_runnable {
+        virtual void new_client(socket_io_result_t res, sserver* svr, ssocket* s, addr_pair_t addr) noexcept override {
+            if(res.err) {
+                std::cout << "accept err:" << res.naviteerr << std::endl;
+                return;
+            }
+            std::cout << "new client:" << addr.remote.ip << "," << addr.remote.port << std::endl;
+            delete s;
+        }
+    };
+    server.start(&loop, new server_ctx{}, {.iptype = 0, .port = 60000, .ip = {"0.0.0.0"} });
     loop.run();
 }
 

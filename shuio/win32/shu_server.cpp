@@ -62,8 +62,7 @@ namespace shu {
 				assert(e == ERROR_IO_PENDING);
 				if (e != ERROR_IO_PENDING) {
 					// TODO: 一旦走到这里，就代表重大故障！考虑是否增加重试?
-					complete->sock;
-					complete = nullptr;
+					delete complete->sock;
 					socket_io_result_t res{ .err = 1, .naviteerr = s_last_error() };
 					creator->new_client(res, server, nullptr, {});
 				}
