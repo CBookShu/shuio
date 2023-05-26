@@ -19,6 +19,7 @@ namespace shu {
     }uring_navite_t;
     
     enum class op_type : __u8 {
+        type_none,
         type_io,
         type_run
     };

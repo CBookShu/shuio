@@ -20,7 +20,7 @@ target("example")
     if is_os("windows") then
         add_files("example/sio.cpp")
     elseif is_os("linux") then
-        add_files("example/linux_test.cpp")
+        add_files("example/sio.cpp")
     end
 --
 -- If you want to known more usage about xmake, please see https://xmake.io

@@ -238,7 +238,9 @@ namespace shu {
                 } else if(ud == &g_timer) {
                     _loop->timer.timer_call();
                 } else {
-                    if (ud->type == op_type::type_io) {
+                    if (ud->type == op_type::type_none) {
+                        std::cout << "none" << std::endl;
+                    } else if (ud->type == op_type::type_io) {
                         uring_ud_io_t* ud_ptr = static_cast<uring_ud_io_t*>(ud);
                         // ud_ptr 生命周期，与io绑定，不归loop管理
                         ud_ptr->cb->run(cqe);

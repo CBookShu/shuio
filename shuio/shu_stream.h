@@ -31,6 +31,7 @@ namespace shu {
 		sstream(sstream&&) noexcept;
 		~sstream();
 
+		auto handle() -> struct sstream_t*;
 		auto option() -> const sstream_opt*;
 		auto option() const -> const sstream_opt*;
 		auto loop() -> sloop*;

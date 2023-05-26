@@ -35,7 +35,7 @@ void start_server() {
                 std::ranges::copy(sp, wb->ready().data());
                 s->write(wb);
             }
-
+            buf->consume(sp.size());
             s->close();
         }
         virtual void on_write(socket_io_result_t res, sstream* s) noexcept override {
@@ -80,7 +80,7 @@ void start_timer() {
 
 int main()
 {
-    start_timer();
+    start_server();
     return 0;
 }
 
