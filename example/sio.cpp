@@ -6,6 +6,7 @@
 #include "shuio/shu_server.h"
 #include "shuio/shu_stream.h"
 #include "shuio/shu_buffer.h"
+#include "shuio/shu_client.h"
 #include <queue>
 #include <chrono>
 #include <functional>
@@ -27,7 +28,7 @@ void start_server() {
             auto buf = s->readbuffer();
             auto sp = buf->ready();
             auto str = std::string_view(sp.data(), sp.size());
-            cout << str << endl;
+            cout << "svr " << str << endl;
 
             for (int i = 0; i < 10; ++i) {
                 auto* wb = new socket_buffer(sp.size());
@@ -36,17 +37,13 @@ void start_server() {
                 s->write(wb);
             }
             buf->consume(sp.size());
-            // s->close();
-            s->loop()->add_timer_f([s](){
-                s->loop()->stop();
-            }, 5s);
         }
         virtual void on_write(socket_io_result_t res, sstream::SPtr s) noexcept override {
-            cout << "on write" << endl;
+            cout << "svr on write" << endl;
         };
         virtual void on_close(const sstream::SPtr s) noexcept override {
             auto addr = s->option()->addr;
-            cout << "close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
+            cout << "svr close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
         };
     };
 
@@ -63,6 +60,46 @@ void start_server() {
         }
     };
     svr.start(&l, new server_ctx, { .iptype = 0, .port = 60000, .ip = {"0.0.0.0"} });
+
+    struct stream_ctx_client : sstream_runable {
+        virtual void on_read(socket_io_result_t res, sstream::SPtr s) noexcept override {
+            if (res.err) {
+                std::cout << "read err:" << res.naviteerr << endl;
+                return;
+            }
+
+            auto buf = s->readbuffer();
+            auto sp = buf->ready();
+            auto str = std::string_view(sp.data(), sp.size());
+            std::cout << "clent " << str << endl;
+
+            buf->consume(sp.size());
+        }
+        virtual void on_write(socket_io_result_t res, sstream::SPtr s) noexcept override {
+            std::cout << "clent on write" << endl;
+        };
+        virtual void on_close(const sstream::SPtr s) noexcept override {
+            auto addr = s->option()->addr;
+            std::cout << "clent close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
+        };
+    } ;
+    shu_connect(&l, {.iptype = 0, .port = 60000, .ip = {"0.0.0.0"}}, 
+    [&l](socket_io_result res, ssocket* sock, addr_pair_t addr){
+        if(res.err) return;
+
+        sstream_opt opt = { .addr = addr };
+        auto stream = std::make_shared<sstream>(&l, sock, opt);
+        stream->start_read(new stream_ctx_client{});
+
+        l.add_timer_f([stream](){
+            const char* s = "hello svr";
+            auto* buf = new socket_buffer{strlen(s)};
+            buf->commit(strlen(s));
+            auto sp = buf->ready();
+            std::memcpy(sp.data(), s, strlen(s));
+            stream->write(buf);
+        }, 2s);
+    });
     l.run();
 }
 

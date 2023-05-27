@@ -59,4 +59,8 @@ namespace shu {
 	}socket_io_result;
 
 	int s_last_error();
+
+	// void* -> struct sockaddr_in
+	void sockaddr_2_storage(void*, addr_storage_t*);
+	bool storage_2_sockaddr(addr_storage_t*, void*);
 };
