@@ -27,6 +27,7 @@ namespace shu {
 		sstream_t* _s;
 		S_DISABLE_COPY(sstream);
 	public:
+		using SPtr = std::shared_ptr<sstream>;
 		sstream(sloop*,ssocket*,sstream_opt opt);
 		sstream(sstream&&) noexcept;
 		~sstream();
@@ -50,9 +51,9 @@ namespace shu {
 
 	struct sstream_runable {
 		virtual ~sstream_runable() {}
-		virtual void on_read(socket_io_result_t, sstream*) noexcept = 0;
-		virtual void on_write(socket_io_result_t, sstream*) noexcept = 0;
-		virtual void on_close(const sstream*) noexcept = 0;
+		virtual void on_read(socket_io_result_t, sstream::SPtr) noexcept = 0;
+		virtual void on_write(socket_io_result_t, sstream::SPtr) noexcept = 0;
+		virtual void on_close(const sstream::SPtr) noexcept = 0;
 		virtual void destroy() noexcept {
 			delete this;
 		}

@@ -202,6 +202,7 @@ namespace shu {
 		if (_s->op) {
 			if (_s->op->cb) {
 				_s->op->cb->on_close(this);
+				_s->op->cb->destroy();
 			}
 			delete _s->op;
 		}

@@ -73,11 +73,11 @@ namespace shu {
             uring_stream_compelte* c = (uring_stream_compelte*)cqe->user_data;
             if(cqe->res < 0) {
                 socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = cqe->res };
-                s->handle()->cb->on_read(res, s.get());
+                s->handle()->cb->on_read(res, s);
             } else {
                 socket_io_result_t res{ .bytes = cqe->res };
                 buffer->commit(cqe->res);
-                s->handle()->cb->on_read(res, s.get());
+                s->handle()->cb->on_read(res, s);
             }
             if(c == &complete && cancel.hold) {
                 c->hold.reset();
@@ -154,10 +154,10 @@ namespace shu {
             uring_stream_compelte* c = (uring_stream_compelte*)cqe->user_data;
             if(cqe->res < 0) {
                 socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = cqe->res };
-                s->handle()->cb->on_write(res, s.get());
+                s->handle()->cb->on_write(res, s);
             } else {
                 socket_io_result_t res{ .bytes = cqe->res };
-                s->handle()->cb->on_write(res, s.get());
+                s->handle()->cb->on_write(res, s);
             }
             
             if(cancel.hold && c == &complete) {
@@ -213,6 +213,11 @@ namespace shu {
             delete _s->sock;
         }
 
+        if(_s->cb) {
+            _s->cb->on_close(shared_from_this());
+            _s->cb->destroy();
+        }
+
         delete _s->write_op;
         delete _s->read_op;
 
@@ -247,8 +252,11 @@ namespace shu {
         _s->read_op->s = shared_from_this();
         _s->write_op = new uring_write_op{};
         _s->write_op->s = shared_from_this();
-        _s->read_op->init();
-        _s->write_op->init();
+        auto self = shared_from_this();
+        _s->loop->dispatch_f([self, this](){
+            _s->read_op->init();
+            _s->write_op->init();
+        });
     }
     // call after start read
     auto sstream::write(socket_buffer* buff) -> bool {

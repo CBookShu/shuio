@@ -18,7 +18,7 @@ void start_server() {
     sserver svr({});
 
     struct stream_ctx : sstream_runable {
-        virtual void on_read(socket_io_result_t res, sstream* s) noexcept override {
+        virtual void on_read(socket_io_result_t res, sstream::SPtr s) noexcept override {
             if (res.err) {
                 cout << "read err:" << res.naviteerr << endl;
                 return;
@@ -36,12 +36,15 @@ void start_server() {
                 s->write(wb);
             }
             buf->consume(sp.size());
-            s->close();
+            // s->close();
+            s->loop()->add_timer_f([s](){
+                s->loop()->stop();
+            }, 5s);
         }
-        virtual void on_write(socket_io_result_t res, sstream* s) noexcept override {
+        virtual void on_write(socket_io_result_t res, sstream::SPtr s) noexcept override {
             cout << "on write" << endl;
         };
-        virtual void on_close(const sstream* s) noexcept override {
+        virtual void on_close(const sstream::SPtr s) noexcept override {
             auto addr = s->option()->addr;
             cout << "close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
         };
@@ -60,7 +63,6 @@ void start_server() {
         }
     };
     svr.start(&l, new server_ctx, { .iptype = 0, .port = 60000, .ip = {"0.0.0.0"} });
-
     l.run();
 }
 
