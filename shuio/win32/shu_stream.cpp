@@ -85,7 +85,7 @@ namespace shu {
 					// 需要进行错误投递！
 					rd_complete->hold.reset();
 					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
-					cb->on_read(res, _s.get());
+					cb->on_read(res, _s);
 				}
 				else {
 					reading = true;
@@ -128,7 +128,7 @@ namespace shu {
 					// 需要进行错误投递！
 					wt_complete->hold.reset();
 					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
-					cb->on_write(res, _s.get());
+					cb->on_write(res, _s);
 				}
 				else {
 					writing = true;
@@ -144,7 +144,7 @@ namespace shu {
 				reading = false;
 				rd_buf->commit(entry->dwNumberOfBytesTransferred);
 				socket_io_result_t res{ .bytes = entry->dwNumberOfBytesTransferred };
-				cb->on_read(res, _s.get());
+				cb->on_read(res, _s);
 				post_read();
 			}
 			else if (entry->lpOverlapped == wt_complete) {
@@ -152,7 +152,7 @@ namespace shu {
 				wt_complete->hold.reset();
 				writing = false;
 				socket_io_result_t res{ .bytes = entry->dwNumberOfBytesTransferred };
-				cb->on_write(res, _s.get());
+				cb->on_write(res, _s);
 				auto total = entry->dwNumberOfBytesTransferred;
 				auto eraseit = wt_bufs.begin();
 				auto do_erase = false;
@@ -201,7 +201,7 @@ namespace shu {
 		if(!_s)	return;
 		if (_s->op) {
 			if (_s->op->cb) {
-				_s->op->cb->on_close(this);
+				_s->op->cb->on_close(shared_from_this());
 				_s->op->cb->destroy();
 			}
 			delete _s->op;
