@@ -72,7 +72,6 @@ namespace shu {
             op->loop = loop;
             op->cb = cb;
             op->remote_addr = saddr;
-            op->cb = std::move(cb);
             op->sock = new ssocket({});
             op->sock->init(0);
             op->post_connect();

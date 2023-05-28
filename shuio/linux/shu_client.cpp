@@ -16,7 +16,7 @@ namespace shu {
 
         addr_storage_t remote_addr;
         struct sockaddr_in local_addr;
-        std::function<void(socket_io_result, ssocket*, addr_pair_t)> cb;
+        connect_runable* cb;
 
         ~uring_connect_op() {
             if(sock) {
@@ -39,7 +39,8 @@ namespace shu {
         virtual void run(io_uring_cqe* cqe) noexcept override {
             if(cqe->res < 0) {
                 socket_io_result res{.err = 1, .naviteerr = cqe->res};
-                cb(res, nullptr, {});
+                cb->run(res, nullptr, {});
+                cb->destroy();
                 delete this;
             } else {
                 socket_io_result res{.err = 0};
@@ -47,7 +48,8 @@ namespace shu {
                 addr_pair_t addr_pair;
                 addr_pair.remote = remote_addr;
                 sockaddr_2_storage(&local_addr, &addr_pair.local);
-                cb(res, tmp, addr_pair);
+                cb->run(res, tmp, addr_pair);
+                cb->destroy();
                 delete this;
             }
         }
@@ -55,13 +57,13 @@ namespace shu {
 
     void shu_connect(sloop* loop, 
     addr_storage_t saddr, 
-    std::function<void(socket_io_result,  ssocket*, addr_pair_t)> cb) 
+    connect_runable* cb) 
     {
-        loop->dispatch_f([loop,saddr,cb=std::move(cb)]() {
+        loop->dispatch_f([loop,saddr,cb]() {
             auto* op = new uring_connect_op{};
             op->loop = loop;
             op->remote_addr = saddr;
-            op->cb = std::move(cb);
+            op->cb =cb;
             op->complete.type = op_type::type_io;
             op->complete.cb = op;
             op->sock = new ssocket({});
