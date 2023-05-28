@@ -83,23 +83,28 @@ void start_server() {
             std::cout << "clent close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
         };
     } ;
-    shu_connect(&l, {.iptype = 0, .port = 60000, .ip = {"0.0.0.0"}}, 
-    [&l](socket_io_result res, ssocket* sock, addr_pair_t addr){
-        if(res.err) return;
+    struct con_callback : connect_runable {
+        sloop* loop;
+        void run(socket_io_result res, ssocket* sock, addr_pair_t addr) noexcept override {
+            if(res.err) return;
 
-        sstream_opt opt = { .addr = addr };
-        auto stream = std::make_shared<sstream>(&l, sock, opt);
-        stream->start_read(new stream_ctx_client{});
+            sstream_opt opt = { .addr = addr };
+            auto stream = std::make_shared<sstream>(loop, sock, opt);
+            stream->start_read(new stream_ctx_client{});
 
-        l.add_timer_f([stream](){
-            const char* s = "hello svr";
-            auto* buf = new socket_buffer{strlen(s)};
-            buf->commit(strlen(s));
-            auto sp = buf->ready();
-            std::memcpy(sp.data(), s, strlen(s));
-            stream->write(buf);
-        }, 2s);
-    });
+            loop->add_timer_f([stream](){
+                const char* s = "hello svr";
+                auto* buf = new socket_buffer{strlen(s)};
+                buf->commit(strlen(s));
+                auto sp = buf->ready();
+                std::memcpy(sp.data(), s, strlen(s));
+                stream->write(buf);
+            }, 2s);
+        }
+        void destroy() noexcept {}
+    }concb;
+    concb.loop = &l;
+    shu_connect(&l, {.iptype = 0, .port = 60000, .ip = {"127.0.0.1"}},&concb);
     l.run();
 }
 

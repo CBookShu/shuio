@@ -43,7 +43,7 @@ namespace shu {
 
 	typedef struct addr_storage_t {
 		int iptype;//0 tcp,1 udp
-		int port;
+		std::uint64_t port;
 		char ip[64];
 	}addr_storage_t;
 
