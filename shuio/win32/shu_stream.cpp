@@ -15,7 +15,7 @@ namespace shu {
 		sstream_opt opt;
 	};
 
-	struct sstream_rw_complete_t : public OVERLAPPED {
+	struct sstream_rw_complete_t : public socket_user_op {
 		std::shared_ptr<sstream> hold;
 	};
 
@@ -52,7 +52,9 @@ namespace shu {
 		void init() {
 			auto _s = ss.lock();
 			rd_complete = new sstream_rw_complete_t{};
+			rd_complete->cb = this;
 			wt_complete = new sstream_rw_complete_t{};
+			wt_complete->cb = this;
 			rd_buf = new socket_buffer{ _s->option()->read_buffer_init};
 			post_read();
 		}
@@ -249,7 +251,7 @@ namespace shu {
 		_s->op->ss = this->weak_from_this();
 		_s->op->cb = sr;
 		// this call will fail?
-		navite_attach_iocp(_s->loop, _s->sock, _s->op);
+		navite_attach_iocp(_s->loop, _s->sock, IOCP_OP_TYPE::SOCKET_TYPE);
 		_s->op->init();
 	}
 

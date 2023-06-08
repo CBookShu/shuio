@@ -12,10 +12,10 @@ namespace shu {
     {
         return reinterpret_cast<sock_navite_t*>(s->handle());
     }
-    auto navite_attach_iocp(sloop* l, ssocket* s, void* CompletionKey) -> bool
+    auto navite_attach_iocp(sloop* l, ssocket* s, IOCP_OP_TYPE type) -> bool
     {
         auto* iocp = navite_cast_loop(l);
         auto* sock = navite_cast_ssocket(s);
-        return ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(sock->s), iocp->iocp, reinterpret_cast<ULONG_PTR>(CompletionKey), 0);
+        return ::CreateIoCompletionPort(reinterpret_cast<HANDLE>(sock->s), iocp->iocp, static_cast<ULONG_PTR>(type), 0);
     }
 };

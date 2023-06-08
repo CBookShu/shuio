@@ -120,13 +120,15 @@ namespace shu {
 		}
 	};
 
+	struct task_user_op : public OVERLAPPED {
+		sloop_runable* cb;
+	};
+
 	struct sloop::sloop_t : public iocp_navite_t {
 		std::thread::id loop_tid;
 		struct sloop_opt opt;
 		local_timer timer;
 	};
-	static sloop_empty_runable g_stop_op;
-	static sloop_empty_runable g_timer_op;
 
 	sloop::sloop(sloop_opt opt)
 	{
@@ -157,9 +159,15 @@ namespace shu {
 
 	auto sloop::post(sloop_runable*r) -> bool
 	{
-		auto res = ::PostQueuedCompletionStatus(_loop->iocp, 0, reinterpret_cast<ULONG_PTR>(r), nullptr);
+		auto op_ptr = std::make_unique<task_user_op>();
+		op_ptr->cb = r;
+		auto res = ::PostQueuedCompletionStatus(_loop->iocp, 0, IOCP_OP_TYPE::TASK_TYPE, op_ptr.get());
 		if (!res) {
 			r->destroy();
+			op_ptr.reset();
+		}
+		else {
+			op_ptr.release();
 		}
 		return res;
 	}
@@ -171,11 +179,7 @@ namespace shu {
 			r->destroy();
 			return true;
 		}
-		auto res = ::PostQueuedCompletionStatus(_loop->iocp, 0, reinterpret_cast<ULONG_PTR>(r), nullptr);
-		if (!res) {
-			r->destroy();
-		}
-		return res;
+		return post(r);
 	}
 
 	auto sloop::add_timer(sloop_runable* r, std::chrono::milliseconds time) -> sloop_timer_t_id
@@ -213,7 +217,7 @@ namespace shu {
 		_loop->timer.max_expired_time = _loop->opt.max_expired_time;
 		_loop->timer.start_timer([this]() {
 			// 定时器到了需要触发iocp循环
-			::PostQueuedCompletionStatus(_loop->iocp, 0, reinterpret_cast<ULONG_PTR>(&g_timer_op), nullptr);
+			::PostQueuedCompletionStatus(_loop->iocp, 0, IOCP_OP_TYPE::TIMER_TYPE, nullptr);
 		}, _loop->opt.max_expired_time);
 		
 		// iocp loop begin
@@ -227,35 +231,47 @@ namespace shu {
 				continue;
 			}
 			bool hasstop = false;
+			bool hastimer = false;
 			// first do socket op
-			int pure_idx[128] = { -1 };
+			int pure_idx[128] = { 0 };
 			std::size_t pos = 0;
 
 			for (std::size_t i = 0; i < count; ++i) {
-				if (overlappeds[i].lpOverlapped) {
-					// 投递了完成事件即: socket操作
-					auto* op = reinterpret_cast<iocp_sock_callback*>(overlappeds[i].lpCompletionKey);
-					op->run(overlappeds + i);
+				auto type = IOCP_OP_TYPE(overlappeds[i].lpCompletionKey);
+				if (type == IOCP_OP_TYPE::TIMER_TYPE) {
+					hastimer = true;
+				}
+				else if (type == IOCP_OP_TYPE::STOP_TYPE) {
+					hasstop = true;
+				}
+				else if (type == IOCP_OP_TYPE::SOCKET_TYPE) {
+					assert(overlappeds[i].lpOverlapped);
+					// socket type 一定要有overlapped
+					auto* ud = reinterpret_cast<socket_user_op*>(overlappeds[i].lpOverlapped);
+					if (ud) {
+						// IO 的lpOverlapped 由io自己负责释放
+						ud->cb->run(overlappeds + i);
+					}
+				}
+				else if (type == IOCP_OP_TYPE::TASK_TYPE) {
+					pure_idx[pos++] = i;
 				}
 				else {
-					pure_idx[pos++] = i;
+					// error
+					assert(false);
 				}
 			}
 			for (std::size_t i = 0; i < pos; ++i) {
-				auto* op = reinterpret_cast<sloop_runable*>(overlappeds[pure_idx[i]].lpCompletionKey);
+				auto* ud = reinterpret_cast<task_user_op*>(overlappeds[pure_idx[i]].lpOverlapped);
 				// 纯粹的op操作
-				if (op) {
-					op->run();
-					op->destroy();
+				if (ud) {
+					ud->cb->run();
+					ud->cb->destroy();
+					delete ud;
 				}
-				if (op == &g_stop_op) {
-					// stop
-					hasstop = true;
-				}
-				else if (op == &g_timer_op) {
-					// timer
-					_loop->timer.timer_call();
-				}
+			}
+			if (hastimer) {
+				_loop->timer.timer_call();
 			}
 			if (hasstop) {
 				break;
@@ -297,7 +313,7 @@ namespace shu {
 
 	auto sloop::stop() -> void
 	{
-		::PostQueuedCompletionStatus(_loop->iocp, 0, reinterpret_cast<ULONG_PTR>(&g_stop_op), nullptr);
+		::PostQueuedCompletionStatus(_loop->iocp, 0, IOCP_OP_TYPE::STOP_TYPE, nullptr);
 	}
 
 };

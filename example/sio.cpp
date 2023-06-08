@@ -105,6 +105,10 @@ void start_server() {
     }concb;
     concb.loop = &l;
     shu_connect(&l, {.iptype = 0, .port = 60000, .ip = {"127.0.0.1"}},&concb);
+
+    l.add_timer_f([&l]() {
+        l.stop();
+    }, 1s);
     l.run();
 }
 

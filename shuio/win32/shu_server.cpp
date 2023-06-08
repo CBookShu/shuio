@@ -14,7 +14,7 @@ namespace shu {
 		socket_accptor_op* op;
 	};
 
-	struct acceptor_complete_t : OVERLAPPED {
+	struct acceptor_complete_t : socket_user_op {
 		enum { buffer_size = (sizeof(sockaddr) + 16) * 2 };
 		ssocket* sock;
 		char buffer[buffer_size];
@@ -31,6 +31,7 @@ namespace shu {
 		LPFN_GETACCEPTEXSOCKADDRS lpfnGetAcceptExSockAddrs;
 		sserver* server = nullptr;
 		acceptor_complete_t* completes[4] = {};
+		socket_user_op op{};
 
 		socket_accptor_op(sserver* p) :server(p) {}
 		~socket_accptor_op() {
@@ -40,10 +41,12 @@ namespace shu {
 		}
 
 		void init() {
-			navite_attach_iocp(server->loop(), server->sock(), this);
+			op.cb = this;
+			navite_attach_iocp(server->loop(), server->sock(), IOCP_OP_TYPE::SOCKET_TYPE);
 
 			for (std::size_t i = 0; i < std::size(completes); ++i) {
 				completes[i] = new acceptor_complete_t{};
+				completes[i]->cb = this;
 				post_acceptor(completes[i]);
 			}
 		}
