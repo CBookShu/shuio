@@ -41,7 +41,7 @@ void start_server() {
         virtual void on_write(socket_io_result_t res, sstream::SPtr s) noexcept override {
             cout << "svr on write" << endl;
         };
-        virtual void on_close(const sstream::SPtr s) noexcept override {
+        virtual void on_close(const sstream* s) noexcept override {
             auto addr = s->option()->addr;
             cout << "svr close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
         };
@@ -78,7 +78,7 @@ void start_server() {
         virtual void on_write(socket_io_result_t res, sstream::SPtr s) noexcept override {
             std::cout << "clent on write" << endl;
         };
-        virtual void on_close(const sstream::SPtr s) noexcept override {
+        virtual void on_close(const sstream* s) noexcept override {
             auto addr = s->option()->addr;
             std::cout << "clent close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
         };
@@ -100,15 +100,17 @@ void start_server() {
                 std::memcpy(sp.data(), s, strlen(s));
                 stream->write(buf);
             }, 2s);
+            loop->add_timer_f([stream](){
+                stream->close();
+            }, 4s);
         }
         void destroy() noexcept {}
     }concb;
     concb.loop = &l;
     shu_connect(&l, {.iptype = 0, .port = 60000, .ip = {"127.0.0.1"}},&concb);
-
     l.add_timer_f([&l]() {
         l.stop();
-    }, 1s);
+    }, 2s);
     l.run();
 }
 

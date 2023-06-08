@@ -53,7 +53,7 @@ namespace shu {
 		virtual ~sstream_runable() {}
 		virtual void on_read(socket_io_result_t, sstream::SPtr) noexcept = 0;
 		virtual void on_write(socket_io_result_t, sstream::SPtr) noexcept = 0;
-		virtual void on_close(const sstream::SPtr) noexcept = 0;
+		virtual void on_close(const sstream*) noexcept = 0;
 		virtual void destroy() noexcept {
 			delete this;
 		}

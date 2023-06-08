@@ -146,33 +146,40 @@ namespace shu {
 				reading = false;
 				rd_buf->commit(entry->dwNumberOfBytesTransferred);
 				socket_io_result_t res{ .bytes = entry->dwNumberOfBytesTransferred };
-				cb->on_read(res, _s);
-				post_read();
+				if (res.bytes > 0) {
+					cb->on_read(res, _s);
+					post_read();
+				}
+				else {
+					_s->close();
+				}
 			}
 			else if (entry->lpOverlapped == wt_complete) {
 				// write
 				wt_complete->hold.reset();
 				writing = false;
 				socket_io_result_t res{ .bytes = entry->dwNumberOfBytesTransferred };
-				cb->on_write(res, _s);
-				auto total = entry->dwNumberOfBytesTransferred;
-				auto eraseit = wt_bufs.begin();
-				auto do_erase = false;
-				for (auto it = wt_bufs.begin(); it != wt_bufs.end(); ++it) {
-					auto* buf = (*it);
-					total -= buf->consume(total);
-					auto ready = buf->ready();
-					if (ready.size() > 0) {
-						// 没有写玩? 
-						// 一般来说write 在socket 窗口缓存超出的时候，会写入失败
-						break;
+				if (res.bytes > 0) {
+					cb->on_write(res, _s);
+					auto total = entry->dwNumberOfBytesTransferred;
+					auto eraseit = wt_bufs.begin();
+					auto do_erase = false;
+					for (auto it = wt_bufs.begin(); it != wt_bufs.end(); ++it) {
+						auto* buf = (*it);
+						total -= buf->consume(total);
+						auto ready = buf->ready();
+						if (ready.size() > 0) {
+							// 没有写玩? 
+							// 一般来说write 在socket 窗口缓存超出的时候，会写入失败
+							break;
+						}
+						delete buf;	// 提前释放掉
+						do_erase = true;
+						eraseit = it;
 					}
-					delete buf;	// 提前释放掉
-					do_erase = true;
-					eraseit = it;
-				}
-				if (do_erase) {
-					wt_bufs.erase(wt_bufs.begin(), eraseit + 1);
+					if (do_erase) {
+						wt_bufs.erase(wt_bufs.begin(), eraseit + 1);
+					}
 				}
 				if (!wt_bufs.empty()) {
 					// 继续完成未完成的写入事业！
@@ -203,8 +210,7 @@ namespace shu {
 		if(!_s)	return;
 		if (_s->op) {
 			if (_s->op->cb) {
-				_s->op->cb->on_close(shared_from_this());
-				_s->op->cb->destroy();
+				_s->op->cb->on_close(this);
 			}
 			delete _s->op;
 		}
@@ -257,10 +263,6 @@ namespace shu {
 
 	auto sstream::write(socket_buffer* buf) -> bool
 	{
-		if (_s->op->stop.load()) {
-			return false;
-		}
-		
 		auto self = shared_from_this();
 		_s->loop->dispatch(new ioloop_functor([self,this,buf]() {
 			_s->op->post_write(buf);
@@ -276,14 +278,12 @@ namespace shu {
 		}
 		
 		auto self = shared_from_this();
-		_s->loop->post(new ioloop_functor([self, this]() mutable {
+		_s->loop->post_f([self, this]() mutable {
+			// IOCP 哪怕调用了CancelIoEx，如果操作已经在完成队列，get也是拿得到的，stream的生命周期要再往后延迟一下
 			auto sock = navite_cast_ssocket(_s->sock);
 			::CancelIoEx((HANDLE)sock->s, _s->op->rd_complete);
-			_s->op->rd_complete->hold.reset();
 			::CancelIoEx((HANDLE)sock->s, _s->op->wt_complete);
-			_s->op->wt_complete->hold.reset();
-			//self.reset();
-		}));
+		});
 	}
 
 };

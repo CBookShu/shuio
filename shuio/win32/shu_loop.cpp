@@ -294,13 +294,24 @@ namespace shu {
 				break;
 			}
 			for (ULONG i = 0; i < count; ++i) {
-				if (!overlappeds[i].lpOverlapped) {
-					auto* op = reinterpret_cast<sloop_runable*>(overlappeds[i].lpCompletionKey);
-					// 不再执行，直接抛弃掉！
-					op->destroy();
+				auto type = IOCP_OP_TYPE(overlappeds[i].lpCompletionKey);
+				if (type == IOCP_OP_TYPE::SOCKET_TYPE) {
+				}
+				else if (type == IOCP_OP_TYPE::TASK_TYPE) {
+					auto* ud = reinterpret_cast<task_user_op*>(overlappeds[i].lpOverlapped);
+					if (ud) {
+						ud->cb->destroy();
+					}
+				}
+				else if (type == IOCP_OP_TYPE::TIMER_TYPE) {
+
+				}
+				else if (type == IOCP_OP_TYPE::STOP_TYPE) {
+
 				}
 				else {
-					// socket op 不再操作！
+					// error
+					assert(false);
 				}
 			}
 		}
