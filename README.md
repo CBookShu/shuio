@@ -9,8 +9,6 @@
     2. 定时器
 
 ## 进展
-    win32 tcp timer: 基本完成
-    linux: TODO
-    自定义参数: TODO
     测试用例: TODO
     UDP:TODO
+    Client 生命周期: TODO
