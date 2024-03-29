@@ -2,275 +2,214 @@
 #include "linux_detail.h"
 #include "shuio/shu_buffer.h"
 #include "shuio/shu_loop.h"
+#include <shuio/shu_socket.h>
 
 #include <vector>
 
 namespace shu {
+    struct sstream::sstream_t : public std::enable_shared_from_this<sstream_t> {
+        sstream_opt opt_;
+        sloop* loop_;
+        std::unique_ptr<ssocket> sock_;
 
-    struct uring_read_op;
-    struct uring_write_op;
-    struct sstream::sstream_t {
-        sstream_opt opt;
-        sloop* loop;
-        ssocket* sock;
-        uring_read_op* read_op;
-        uring_write_op* write_op;
-        sstream_runable* cb;
-    };
+        std::unique_ptr<socket_buffer> read_buffer_;
+        std::vector<socket_buffer> write_buffer_;
 
-    struct uring_stream_compelte : uring_ud_io_t {
-        std::shared_ptr<sstream> hold;
-    };
+        io_uring_task_union read_complete_;
+        sstream::func_read_t read_cb_;
+        std::shared_ptr<sstream_t> read_holder_;
 
-    struct uring_read_op : uring_callback {
-        socket_buffer* buffer{nullptr};
-        std::shared_ptr<sstream> s;
-        uring_stream_compelte complete;
-        uring_stream_compelte cancel;
+        io_uring_task_union write_complete_;
+        sstream::func_write_t write_cb_;
+        std::shared_ptr<sstream_t> write_holder_;
 
-        ~uring_read_op() {
-            if(buffer) {
-                delete buffer;
+        bool stop_;
+        
+        sstream_t(sloop* loop, ssocket* sock, sstream_opt opt, sstream::func_read_t&& read_cb, sstream::func_write_t&& write_cb) {
+            loop_ = loop;
+            sock_.reset(sock);
+            opt_ = opt;
+
+            read_buffer_ = std::make_unique<socket_buffer>(opt.read_buffer_init);
+
+            read_cb_ = std::forward<sstream::func_read_t>(read_cb);
+            write_cb_ = std::forward<sstream::func_write_t>(write_cb);
+            stop_ = false;
+        }
+
+        ~sstream_t() {
+            if (sock_ && sock_->valid()) {
+                sock_->shutdown();
+                sock_->close();
             }
         }
-        void init() {
-            complete.type = op_type::type_io;
-            complete.cb = this;
-            cancel.type = op_type::type_io;
-            cancel.cb = this;
-            buffer = new socket_buffer{s->option()->read_buffer_init};
+
+        void start() {
+            read_complete_ = io_uring_socket_t();
+            std::get_if<io_uring_socket_t>(&read_complete_)->cb = [this](io_uring_cqe* cqe){
+                run_read(cqe);
+            };
+            write_complete_ = io_uring_socket_t{};
+            std::get_if<io_uring_socket_t>(&write_complete_)->cb = [this](io_uring_cqe* cqe){
+                run_write(cqe);
+            };
+
             post_read();
         }
-        void post_read() {
-            if(complete.hold) return;
-            io_uring_push_sqe(s->loop(), [this](io_uring* ring){
-                struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                auto buf = buffer->prepare(s->option()->read_buffer_count_per_op);
 
-                auto* sock = navite_cast_ssocket(s->sock());
-                io_uring_prep_recv(sqe, sock->fd, buf.data(), buf.size(), 0);
-                complete.hold = s;
-                io_uring_sqe_set_data(sqe, &complete);
-                io_uring_submit(ring);
-            });
-        }
-        void post_cancel() {
-            if(cancel.hold) {
+        void post_write(socket_buffer* buf) {
+            if(stop_) {
                 return;
             }
-            if(!complete.hold) {
-                return;
-            }
-            io_uring_push_sqe(s->loop(), [this](io_uring* ring){
-                struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                io_uring_prep_cancel(sqe, &complete, 0);
-                cancel.hold = s;
-                io_uring_sqe_set_data(sqe, &cancel);
-                io_uring_submit(ring);
-            });
-        }
-        virtual void run(io_uring_cqe* cqe) noexcept override {
-            uring_stream_compelte* c = (uring_stream_compelte*)cqe->user_data;
-            if(cqe->res < 0) {
-                socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = cqe->res };
-                s->handle()->cb->on_read(res, s);
-            } else {
-                socket_io_result_t res{ .bytes = cqe->res };
-                buffer->commit(cqe->res);
-                s->handle()->cb->on_read(res, s);
-            }
-            if(c == &complete && cancel.hold) {
-                c->hold.reset();
-                return;
-            }
-            if(c == &cancel) {
-                c->hold.reset();
-                s.reset();
-                return;
-            }
-            c->hold.reset();
-            post_read();
-        }
-    };
-    struct uring_write_op : uring_callback {
-        std::vector<socket_buffer*> buffers{};
-        std::shared_ptr<sstream> s;
-        uring_stream_compelte complete;
-        uring_stream_compelte cancel;
+			if (buf && !buf->ready().empty()) {
+				write_buffer_.emplace_back(std::move(*buf));
+			}
 
-        ~uring_write_op() {
-            for(auto& b:buffers) {
-                delete b;
-            }
-        }
-        void init() {
-            complete.type = op_type::type_io;
-            complete.cb = this;
-            cancel.type = op_type::type_io;
-            cancel.cb = this;
-        }
-        void post_write(socket_buffer* buff) {
-            if (buff) {
-                buffers.push_back(buff);
-            }
-            if(!s) {
+            if(write_holder_) {
                 return;
             }
-            if(complete.hold) {
-                return;
-            }
-            
-            io_uring_push_sqe(s->loop(), [this](io_uring* ring){
+
+            io_uring_push_sqe(loop_, [this](io_uring* ring){
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                std::vector<struct iovec> bufs(buffers.size());
+                std::vector<struct iovec> bufs(write_buffer_.size());
                 for(int i = 0; i < bufs.size(); ++i) {
-                    auto b = buffers[i]->ready();
+                    auto b = write_buffer_[i].ready();
                     bufs[i].iov_base = b.data();
                     bufs[i].iov_len = b.size();
                 }
-                auto* sock = navite_cast_ssocket(s->sock());
+                auto* sock = navite_cast_ssocket(sock_.get());
                 io_uring_prep_writev(sqe, sock->fd, bufs.data(), bufs.size(), 0);
-                complete.hold = s;
-                io_uring_sqe_set_data(sqe, &complete);
+                io_uring_sqe_set_data(sqe, &write_complete_);
                 io_uring_submit(ring);
             });
+
+            write_holder_ = shared_from_this();
         }
-        void post_cancel() {
-            if(!complete.hold) {
+
+        void post_read() {
+            if(stop_) {
                 return;
             }
-            if(cancel.hold) {
-                return;
-            }
-            io_uring_push_sqe(s->loop(), [this](io_uring* ring){
-                struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                io_uring_prep_cancel(sqe, &complete, 0);
-                cancel.hold = s;
-                io_uring_sqe_set_data(sqe, &cancel);
+            assert(!read_holder_);
+            io_uring_push_sqe(loop_, [this](io_uring* ring){
+                struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
+                auto buf = read_buffer_->prepare(opt_.read_buffer_count_per_op);
+
+                auto* sock = navite_cast_ssocket(sock_.get());
+                io_uring_prep_recv(sqe, sock->fd, buf.data(), buf.size(), 0);
+                io_uring_sqe_set_data(sqe, &read_complete_);
                 io_uring_submit(ring);
             });
+
+            read_holder_ = shared_from_this();
         }
-        virtual void run(io_uring_cqe* cqe) noexcept override {
-            uring_stream_compelte* c = (uring_stream_compelte*)cqe->user_data;
+
+        void run_read(io_uring_cqe* cqe) {
+            auto tmp = std::move(read_holder_);
+
+            read_ctx_t ctx{ .buf = *read_buffer_ };
+            socket_io_result res;
             if(cqe->res < 0) {
-                socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = cqe->res };
-                s->handle()->cb->on_write(res, s);
-            } else {
-                socket_io_result_t res{ .bytes = cqe->res };
-                s->handle()->cb->on_write(res, s);
+                res = {.bytes = 0, .err = -1, .naviteerr = cqe->res};
+            } else if(cqe->res > 0) {
+                res = {.bytes = cqe->res, .err = 0, .naviteerr = 0};
+                read_buffer_->commit(cqe->res);
+            } else if(cqe->res == 0) {
+                res = {.bytes = cqe->res, .err = -1, .naviteerr = 0};
+            }
+            read_cb_(res, ctx);
+
+            if(res.err != 0) {
+                return;
+            }
+
+            post_read();
+        }
+
+        void run_write(io_uring_cqe* cqe) {
+            auto tmp = std::move(write_holder_);
+            socket_io_result_t res;
+            write_ctx_t ctx{ .bufs = write_buffer_ };
+            if(cqe->res < 0) {
+                res = socket_io_result_t{ .bytes = 0,.err = -1, .naviteerr = cqe->res };
+            } else if(cqe->res > 0) {
+                res = socket_io_result_t{ .bytes = cqe->res, .err = 0, .naviteerr = 0 };
+            } else if(cqe->res == 0) {
+                res = socket_io_result_t{ .bytes = 0, .err = 0, .naviteerr = 0 };
             }
             
-            if(cancel.hold && c == &complete) {
-                c->hold.reset();
-                return;
-            }
-            if(c == &cancel) {
-                c->hold.reset();
-                s.reset();
-                return;
-            }
-            c->hold.reset();
+            write_cb_(res, ctx);
 
             auto total = cqe->res;
-            auto eraseit = buffers.begin();
-            auto do_erase = false;
-            for (auto it = buffers.begin(); it != buffers.end(); ++it) {
-                auto* buf = (*it);
-                total -= buf->consume(total);
-                auto ready = buf->ready();
-                if (ready.size() > 0) {
-                    // 没有写玩? 
-                    // 一般来说write 在socket 窗口缓存超出的时候，会写入失败
-                    break;
-                }
-                delete buf;	// 提前释放掉
-                do_erase = true;
-                eraseit = it;
+            auto it = write_buffer_.begin();
+			for (; it != write_buffer_.end(); ++it) {
+				total -= it->consume(total);
+				auto ready = it->ready();
+				if (ready.size() > 0) {
+					break;
+				}
+			}
+			if (it != write_buffer_.begin()) {
+				write_buffer_.erase(write_buffer_.begin(), it);
+			}
+			if (!write_buffer_.empty()) {
+				post_write(nullptr);
+			}
+        }
+
+        void stop() {
+            if(std::exchange(stop_, true)) {
+                return;
             }
-            if (do_erase) {
-                buffers.erase(buffers.begin(), eraseit + 1);
-            }
-            if (!buffers.empty()) {
-                // 继续完成未完成的写入事业！
-                post_write(nullptr);
-            }
+
+            io_uring_push_sqe(loop_, [&](io_uring* ring){
+                auto* navie_sock = navite_cast_ssocket(sock_.get());
+                struct io_uring_sqe *read_sqe = io_uring_get_sqe(ring);
+                io_uring_prep_cancel(read_sqe, &read_complete_, 0);
+
+                struct io_uring_sqe *write_sqe = io_uring_get_sqe(ring);
+                io_uring_prep_cancel(write_sqe, &write_complete_, 0);
+                io_uring_submit(ring);
+            });
         }
     };
 
-    sstream::sstream(sloop* loop,ssocket* sock,sstream_opt opt) {
-        _s = new sstream_t{};
-        _s->opt = opt;
-        _s->loop = loop;
-        _s->sock = sock;
+    sstream::sstream() {
     }
     sstream::sstream(sstream&& other) noexcept {
-        _s = std::exchange(other._s, nullptr);
+        s_.swap(other.s_);
     }
     sstream::~sstream() {
-        if(!_s) return;
+        if(auto sptr = s_.lock()) {
 
-        if(_s->sock) {
-            delete _s->sock;
         }
-
-        if(_s->cb) {
-            _s->cb->on_close(shared_from_this());
-            _s->cb->destroy();
-        }
-
-        delete _s->write_op;
-        delete _s->read_op;
-
-        delete _s;
     }
 
-    auto sstream::handle() -> struct sstream_t* {
-        return _s;
-    }
-    auto sstream::option() -> const sstream_opt* {
-        return &_s->opt;
-    }
-    auto sstream::option() const -> const sstream_opt* {
-        return &_s->opt;
-    }
-    auto sstream::loop() -> sloop* {
-        return _s->loop;
-    }
-    auto sstream::sock() -> ssocket* {
-        return _s->sock;
-    }
-    auto sstream::readbuffer() -> socket_buffer* {
-        return _s->read_op->buffer;
-    }
-    auto sstream::writebuffer() -> std::span< socket_buffer*> {
-        return _s->write_op->buffers;
-    }
     // just call once after new
-    auto sstream::start_read(sstream_runable* r) -> void {
-        _s->cb = r;
-        _s->read_op = new uring_read_op{};
-        _s->read_op->s = shared_from_this();
-        _s->write_op = new uring_write_op{};
-        _s->write_op->s = shared_from_this();
-        auto self = shared_from_this();
-        _s->loop->dispatch_f([self, this](){
-            _s->read_op->init();
-            _s->write_op->init();
+    auto sstream::start(sloop* l, ssocket* s, sstream_opt opt,
+		sstream::func_read_t&& rcb, sstream::func_write_t&& wcb) -> void {
+
+        auto sptr = std::make_shared<sstream::sstream_t>(l,s,opt,
+            std::forward<func_read_t>(rcb),std::forward<func_write_t>(wcb));
+        s_ = sptr;
+        l->dispatch([sptr](){
+            sptr->start();
         });
     }
     // call after start read
-    auto sstream::write(socket_buffer* buff) -> bool {
-        auto self = shared_from_this();
-        _s->loop->post_f([self, this, buff](){
-            _s->write_op->post_write(buff);
-        });
+    void sstream::write(socket_buffer&& buff){
+        if(auto sptr = s_.lock()) {
+            sptr->loop_->dispatch([sptr, buf = {std::move(buff)}] () mutable{
+                sptr->post_write(const_cast<socket_buffer*>(buf.begin()));
+            });
+        }
     }
-    // call after start read
-    auto sstream::close() -> void {
-        auto self = shared_from_this();
-        _s->loop->post_f([self, this](){
-            _s->write_op->post_cancel();
-            _s->read_op->post_cancel();
-        });
+
+    void sstream::stop() {
+        if(auto sptr = s_.lock()) {
+            sptr->loop_->dispatch([sptr](){
+                sptr->stop();
+            });
+        }
     }
 };

@@ -10,127 +10,185 @@
 #include <queue>
 #include <chrono>
 #include <functional>
+#include <charconv>
 
 using namespace shu;
 using namespace std;
 
 void start_server() {
     sloop l({});
-    sserver svr({});
+    sserver svr;
 
-    struct stream_ctx : sstream_runable {
-        virtual void on_read(socket_io_result_t res, sstream::SPtr s) noexcept override {
-            if (res.err) {
-                cout << "read err:" << res.naviteerr << endl;
-                return;
-            }
-
-            auto buf = s->readbuffer();
-            auto sp = buf->ready();
-            auto str = std::string_view(sp.data(), sp.size());
-            cout << "svr " << str << endl;
-
-            for (int i = 0; i < 10; ++i) {
-                auto* wb = new socket_buffer(sp.size());
-                wb->commit(sp.size());
-                std::ranges::copy(sp, wb->ready().data());
-                s->write(wb);
-            }
-            buf->consume(sp.size());
+    sstream server_stream;
+    auto server_stream_read = [&](socket_io_result_t res, read_ctx_t& r) {
+        if (res.err) {
+            std::cout << "read err:" << res.naviteerr << endl;
+            return;
         }
-        virtual void on_write(socket_io_result_t res, sstream::SPtr s) noexcept override {
-            cout << "svr on write" << endl;
-        };
-        virtual void on_close(const sstream* s) noexcept override {
-            auto addr = s->option()->addr;
-            cout << "svr close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
-        };
+
+        auto rd = r.buf.ready();
+        std::string_view str(rd.data(), rd.size());
+        std::cout << "server: " << str << endl;
+
+        for (int i = 0; i < 10; ++i) {
+            socket_buffer buf(rd.size());
+            buf.prepare(rd).commit();
+            server_stream.write(std::move(buf));
+        }
+        r.buf.consume(rd.size());
+    };
+    auto server_stream_write = [](socket_io_result_t res, write_ctx_t& w) {
+        if (res.err) {
+            std::cout << "write err:" << res.naviteerr << endl;
+            return;
+        }
+        std::cout << "client write" << std::endl;
     };
 
-    struct server_ctx : sserver_runnable {
-        virtual void new_client(socket_io_result_t res, sserver* svr, ssocket* sock, addr_pair_t addr) noexcept {
-            if (res.err) {
-                cout << "accept err:" << res.naviteerr << endl;
-                return;
-            }
-            cout << "new client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
-            sstream_opt opt = { .addr = addr };
-            auto stream = std::make_shared<sstream>(svr->loop(), sock, opt);
-            stream->start_read(new stream_ctx{});
+    auto acceptr_cb = [&](socket_io_result_t res,
+        std::unique_ptr<ssocket> sock, 
+        addr_pair_t addr) {
+        if (res.err) {
+            std::cout << "accept err:" << res.naviteerr << std::endl;
+            return;
         }
+
+        std::cout << "new client:" 
+            << addr.remote.ip 
+            << "[" << addr.remote.port << "]" << endl;
+
+        sstream_opt opt = { .addr = addr };
+        server_stream.start(&l, sock.release(), opt, server_stream_read, server_stream_write);
     };
-    svr.start(&l, new server_ctx, { .iptype = 0, .port = 60000, .ip = {"0.0.0.0"} });
 
-    struct stream_ctx_client : sstream_runable {
-        virtual void on_read(socket_io_result_t res, sstream::SPtr s) noexcept override {
-            if (res.err) {
-                std::cout << "read err:" << res.naviteerr << endl;
-                return;
-            }
 
-            auto buf = s->readbuffer();
-            auto sp = buf->ready();
-            auto str = std::string_view(sp.data(), sp.size());
-            std::cout << "clent " << str << endl;
+    addr_storage_t addr_server{ .udp = false, .port = 5990, .ip = {"0.0.0.0"} };
+    svr.start(&l, acceptr_cb, addr_server);
 
-            buf->consume(sp.size());
+    sstream client_stream;
+    auto client_stream_read = [](socket_io_result_t res, read_ctx_t& r) {
+        if (res.err) {
+            std::cout << "client read error:" << res.naviteerr << std::endl;
+            return;
         }
-        virtual void on_write(socket_io_result_t res, sstream::SPtr s) noexcept override {
-            std::cout << "clent on write" << endl;
-        };
-        virtual void on_close(const sstream* s) noexcept override {
-            auto addr = s->option()->addr;
-            std::cout << "clent close client:" << addr.remote.ip << "[" << addr.remote.port << "]" << endl;
-        };
-    } ;
-    struct con_callback : connect_runable {
-        sloop* loop;
-        void run(socket_io_result res, ssocket* sock, addr_pair_t addr) noexcept override {
-            if(res.err) return;
 
-            sstream_opt opt = { .addr = addr };
-            auto stream = std::make_shared<sstream>(loop, sock, opt);
-            stream->start_read(new stream_ctx_client{});
+        auto rd = r.buf.ready();
+        std::string_view str(rd.data(), rd.size());
+        std::cout << "client: " << str << endl;
+        r.buf.consume(rd.size());
+    };
+    auto client_stream_write = [](socket_io_result_t res, write_ctx_t& w) {
+        
+    };
 
-            loop->add_timer_f([stream](){
-                const char* s = "hello svr";
-                auto* buf = new socket_buffer{strlen(s)};
-                buf->commit(strlen(s));
-                auto sp = buf->ready();
-                std::memcpy(sp.data(), s, strlen(s));
-                stream->write(buf);
-            }, 2s);
-            loop->add_timer_f([stream](){
-                stream->close();
-            }, 4s);
+    auto connect_cb = [&l,&client_stream, client_stream_read, client_stream_write](socket_io_result res,
+        std::unique_ptr<ssocket> sock, 
+        addr_pair_t addr) {
+        
+        if (res.err) {
+            std::cout << "client connect err:" << res.naviteerr << std::endl;
+            return;
         }
-        void destroy() noexcept {}
-    }concb;
-    concb.loop = &l;
-    shu_connect(&l, {.iptype = 0, .port = 60000, .ip = {"127.0.0.1"}},&concb);
-    l.add_timer_f([&l]() {
-        l.stop();
-    }, 2s);
+        sstream_opt opt = { .addr = addr };
+        client_stream.start(&l, sock.release(), opt, client_stream_read, client_stream_write);
+
+        l.add_timer([&client_stream]() {
+            const char* s = "hello svr";
+            socket_buffer buf(strlen(s));
+            buf.prepare(s).commit();
+            client_stream.write(std::move(buf));
+            // client_stream.stop();
+        }, 2s);
+    };
+
+    sclient client;
+    addr_storage_t addr_conn{ .udp = false, .port = 5990, .ip = {"127.0.0.1"} };
+    client.start(&l, addr_conn, connect_cb);
     l.run();
 }
 
 void start_timer() {
     sloop l({});
 
-    l.add_timer_f([&l]() {
+    auto n = std::chrono::high_resolution_clock::now();
+    decltype(n) n1;
+    decltype(n) n2;
+    l.add_timer([&]() {
         l.stop();
     }, 5s);
-    l.add_timer_f([&l]() {
-        l.add_timer_f([&l]() {
+    l.add_timer([&]() {
+        n1 = std::chrono::high_resolution_clock::now();
+        l.add_timer([&]() {
+            n2 = std::chrono::high_resolution_clock::now();
             l.stop();
         }, 2s);
     }, 1s);
     l.run();
+
+    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(n1-n).count() << std::endl;
+    
+    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(n2-n1).count() << std::endl;
 }
 
-int main()
+static void pingpong_server(int argc, char** argv) {
+    // if(argc < 4) {
+    //     fprintf(stderr, "Usage: server <address> <port> <threads>\n");
+    //     return;
+    // }
+
+    /*
+        由于shu_io 异步消息的属性，会大量合并读写，导致ping_pong的性能虚高。
+        不过由于本身代码已经足够简单了，哪怕出现读写等待，理论上框架对于性能的影响
+        也是微乎其微的，先这样吧
+    */
+
+    sloop l({});
+    sserver svr;
+
+    sstream server_stream;
+    auto server_stream_read = [&](socket_io_result_t res, read_ctx_t& r) {
+        if (res.err) {
+            return;
+        }
+        auto rd = r.buf.ready();
+        socket_buffer buf(rd.size());
+        buf.prepare(rd).commit();
+        server_stream.write(std::move(buf));
+        r.buf.consume(rd.size());
+    };
+    auto server_stream_write = [](socket_io_result_t res, write_ctx_t& w) {
+
+    };
+
+    auto acceptr_cb = [&](socket_io_result_t res,
+        std::unique_ptr<ssocket> sock, 
+        addr_pair_t addr) {
+        if (res.err) {
+            std::cout << "accept err:" << res.naviteerr << std::endl;
+            return;
+        }
+
+        // std::cout << "new client:" 
+        //     << addr.remote.ip 
+        //     << "[" << addr.remote.port << "]" << endl;
+
+        sstream_opt opt = { .addr = addr };
+        server_stream.start(&l, sock.release(), opt, server_stream_read, server_stream_write);
+    };
+    int port = 0;
+    const char* sport = "9595";
+    auto r = std::from_chars(sport, sport + strlen(sport), port);
+    addr_storage_t addr_server{ .udp = false, .port = port};
+    svr.start(&l, acceptr_cb, addr_server);
+
+    l.run();
+}
+
+int main(int argc, char**argv)
 {
-    start_server();
+    // start_server();
+    // start_timer();
+    pingpong_server(argc, argv);
     return 0;
 }
 

@@ -6,114 +6,138 @@
 #include <thread>
 #include <future>
 #include <cassert>
+#include <memory>
 
 namespace shu {
 
-    struct connect_complete_t : OVERLAPPED {
-    };
+    struct sclient::sclient_t : public std::enable_shared_from_this<sclient::sclient_t> {
+        sloop* loop_;
+        std::unique_ptr<ssocket> sock_;
+        func_connect_t callback_;
+        addr_storage_t remote_addr_;
+        OVERLAPPED connector_;
 
-    struct iocp_connect_op : iocp_sock_callback {
-        sloop* loop;
-        ssocket* sock;
-        connect_runable* cb;
-        addr_storage_t remote_addr;
-        LPFN_CONNECTEX lpfnConnectEx;
-        socket_user_op complete{};
-        sockaddr_in addr{};
+        std::shared_ptr<sclient_t> hold_;
+        bool stopping;
 
-        ~iocp_connect_op() {
-            if(sock) {
-                delete sock;
-            }
+        sclient_t(sloop* loop, func_connect_t&& callback, addr_storage_t addr) {
+            loop_ = loop;
+            callback_ = callback;
+            remote_addr_ = addr;
+            connector_ = {};
+            stopping = false;
         }
 
-        void init() {
-            sock->init(0);
-            complete.cb = this;
+        void start() {
+            sock_ = std::make_unique<ssocket>();
+            sock_->init(remote_addr_.udp);
+            sock_->noblock(true);
 
-            GUID GuidConnectEx = WSAID_CONNECTEX;
-            DWORD dwBytes;
-            auto navite_sock = navite_cast_ssocket(sock);
+            auto* navite_sock = navite_cast_ssocket(sock_.get());
 
-            if (WSAIoctl(navite_sock->s, SIO_GET_EXTENSION_FUNCTION_POINTER,
-                &GuidConnectEx, sizeof(GuidConnectEx),
-                &lpfnConnectEx, sizeof(lpfnConnectEx),
-                &dwBytes, NULL, NULL) == SOCKET_ERROR) {
-                lpfnConnectEx = nullptr;
-                return;
-            }
-            navite_attach_iocp(loop, sock, IOCP_OP_TYPE::SOCKET_TYPE);
-        }
+            navite_attach_iocp(loop_, sock_.get());
+            // this 一定要比connector_ 活得久
+            // 不把hold 放在lambda中，因为sock_绑定的这个Lambda生命周期太久了
+            navite_sock_setcallbak(sock_.get(), [this](OVERLAPPED_ENTRY* entry) {
+                run(entry);
+            });
 
-        void post_connect() {
-            if (!lpfnConnectEx) {
-                socket_io_result res{ .bytes = 0, .err = 1, .naviteerr = s_last_error()};
-                cb->run(res, nullptr, {});
-                cb->destroy();
-                this->destroy();
-                return;
-            }
-
-            auto* iocp = navite_cast_loop(loop);
-            auto* s = navite_cast_ssocket(sock);
-            struct sockaddr_in b_addr {};
-            b_addr.sin_family = AF_INET;
-            b_addr.sin_addr = in4addr_any;
-            b_addr.sin_port = 0;
-
-            if (::bind(s->s, (struct sockaddr*)&b_addr, sizeof(b_addr)) == SOCKET_ERROR) {
-                socket_io_result res{ .bytes = 0, .err = 1, .naviteerr = s_last_error()};
-                cb->run(res, nullptr, {});
-                cb->destroy();
-                this->destroy();    // 失败了就自裁！
+            addr_storage_t bind_addr;
+            bind_addr.port = 0;
+            bind_addr.udp = false;
+            bind_addr.ip[0] = '\0';
+            if (!sock_->bind(bind_addr)) {
+                auto err = s_last_error();
+                socket_io_result res{ .bytes = 0, .err = 1, .naviteerr = err };
+                callback_(res, nullptr, addr_pair_t{ .remote = remote_addr_, .local = {} });
                 return;
             }
 
+            sockaddr_in addr{};
             int len = sizeof(addr);
-            storage_2_sockaddr(&remote_addr, &addr);
+            storage_2_sockaddr(&remote_addr_, &addr);
+
             DWORD dwBytes = 0;
-            auto ret = lpfnConnectEx(s->s, (struct sockaddr*)&addr, len, nullptr, 0, &dwBytes, &complete);
-            if (!ret) {
+            BOOL r = win32_extension_fns::ConnectEx(navite_sock->s, (struct sockaddr*)&addr, len, nullptr, 0, &dwBytes, &connector_);
+            if (!r) {
                 auto err = s_last_error();
                 if (err != ERROR_IO_PENDING) {
                     socket_io_result res{ .bytes = 0, .err = 1, .naviteerr = err };
-                    cb->run(res, nullptr, {});
-                    cb->destroy();
-                    this->destroy();    // 失败了就自裁！
+                    callback_(res, nullptr, addr_pair_t{ .remote = remote_addr_, .local = {} });
                     return;
                 }
             }
+
+            // 保住自己
+            hold_ = shared_from_this();
         }
-        virtual void run(OVERLAPPED_ENTRY* entry) noexcept override {
-            if(entry->dwNumberOfBytesTransferred != 0) {
-                socket_io_result res{.bytes = 0, .err = 1, .naviteerr = s_last_error() };
-                cb->run(res, nullptr, {});
-                cb->destroy();
-            } else {
-                socket_io_result res{.err = 0};
-                auto* tmp =std::exchange(sock, nullptr);
-                addr_storage_t local_addr;
-                sockaddr_2_storage(&addr, &local_addr);
-                addr_pair_t addr_pair{.remote = remote_addr, .local = local_addr};
-                cb->run(res, tmp, addr_pair);
-                cb->destroy();
+
+        void run(OVERLAPPED_ENTRY* entry) {
+            if (entry->dwNumberOfBytesTransferred != 0) {
+                socket_io_result res{ .bytes = 0, .err = 1, .naviteerr = s_last_error() };
+                callback_(res, nullptr, addr_pair_t{ .remote = remote_addr_, .local = {} });
             }
-            destroy();  // 你的任务完成了！
+            else {
+                socket_io_result res{ .err = 0 };
+                auto* navite_sock = navite_cast_ssocket(sock_.get());
+                addr_pair_t addr_pair{ .remote = remote_addr_};
+                struct sockaddr_in addr;
+                int len = sizeof(addr);
+                if (0 == getsockname(navite_sock->s, (struct sockaddr*)&addr, &len)) {
+                    sockaddr_2_storage(&addr, &addr_pair.local);
+                }
+                callback_(res, std::move(sock_), addr_pair);
+            }
+
+            // 释放自己
+            hold_.reset();
+        }
+    
+        void stop() {
+            if (std::exchange(stopping, true)) {
+                return;
+            }
+
+            auto* navite_sock = navite_cast_ssocket(sock_.get());
+            ::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &connector_);
+            loop_->post([self = shared_from_this()] (){
+                // 下一帧释放自己
+                self->hold_.reset();
+
+                socket_io_result res{ .bytes = 0, .err = -1, .naviteerr = 0};
+                self->callback_(res, nullptr, {});
+            });
         }
     };
 
-    void shu_connect(sloop* loop, 
-    addr_storage_t saddr, 
-    connect_runable* cb) 
+    sclient::sclient()
+    {}
+    sclient::sclient(sclient&& other) noexcept
     {
-        loop->dispatch_f([loop,saddr,cb]() {
-            auto* op = new iocp_connect_op{};
-            op->loop = loop;
-            op->cb = cb;
-            op->remote_addr = saddr;
-            op->sock = new ssocket({});
-            op->init();
-            op->post_connect();
+        s_.swap(other.s_);
+    }
+    sclient::~sclient()
+    {
+        auto sptr = s_.lock();
+        if (sptr) {
+            // TODO: 其实sclient 也是可以让它自生自灭的
+            //shu::exception_check(!sptr, "client_t must close before ~sclient");
+        }
+    }
+    void sclient::start(sloop* loop, addr_storage_t saddr, func_connect_t&& cb)
+    {
+        auto sptr = std::make_shared<sclient_t>(loop, std::forward<func_connect_t>(cb), saddr);
+        s_ = sptr;
+        loop->dispatch([sptr]() {
+            sptr->start();
         });
+    }
+    void sclient::stop()
+    {
+        if (auto sptr = s_.lock()) {
+            sptr->loop_->dispatch([sptr]() {
+                sptr->stop();
+            });
+        }
     }
 };

@@ -14,80 +14,34 @@ namespace shu {
 	using nasec_t = std::chrono::nanoseconds;
 	constexpr auto ms_1 = std::chrono::milliseconds(1);
 
-	struct sloop_opt {
-		// 超过该配置分钟的定时器，按照这个值进行设置
-		micsec_t max_expired_time = minute_t(5);	// 默认5分钟
-	};
-	struct sloop_runable;
 	struct sloop_timer_t_id{
+		std::chrono::steady_clock::time_point expire;
 		std::uint64_t id{ 0 };
-		tp_t expire;
 	};
 
 	class sloop
 	{
 		struct sloop_t;
-		sloop_t* _loop;
+		sloop_t* loop_;
 		S_DISABLE_COPY(sloop);
 	public:
-		sloop(sloop_opt opt);
+		sloop();
 		sloop(sloop&& other) noexcept;
 		~sloop();
 
 		auto handle() -> sloop_t*;
 
-		auto post(sloop_runable*) -> bool;
-		auto post_f(auto&& f) -> bool;
+		void post(func_t&& f);
 
-		auto dispatch(sloop_runable*) -> bool;
-		auto dispatch_f(auto&& f) -> bool;
+		void dispatch(func_t&& f);
 
-		auto add_timer(sloop_runable*, std::chrono::milliseconds) -> sloop_timer_t_id;
-		auto add_timer_f(auto&& f, std::chrono::milliseconds) -> sloop_timer_t_id;
+		auto add_timer(func_t&&, std::chrono::milliseconds) -> sloop_timer_t_id;
 		auto cancel_timer(sloop_timer_t_id)->void;
 
 		auto run() -> void;
 		auto stop() -> void;
+
+		void assert_thread(std::source_location call = std::source_location::current());
 	};
-
-
-	/// utils
-	struct sloop_runable {
-		virtual ~sloop_runable() {}
-		virtual void run() noexcept = 0;
-		virtual void destroy() noexcept {
-			delete this;
-		};
-	};
-	struct sloop_empty_runable : sloop_runable {
-		virtual void run() noexcept {}
-		virtual void destroy() noexcept {}
-	};
-	template <typename F>
-	struct ioloop_functor : public sloop_runable {
-		F f;
-		ioloop_functor(F&& f) :f(std::move(f)) {}
-		virtual void run() noexcept override {
-			f();
-		}
-	};
-
-	auto sloop::post_f(auto&& f) -> bool
-	{
-		auto pf = new ioloop_functor(std::move(f));
-		return post(pf);
-	}
-
-	auto sloop::dispatch_f(auto&& f) -> bool
-	{
-		auto pf = new ioloop_functor(std::move(f));
-		return dispatch(pf);
-	}
-
-	auto sloop::add_timer_f(auto&& f, std::chrono::milliseconds ms) -> sloop_timer_t_id
-	{
-		auto* pf = new ioloop_functor(std::move(f));
-		return add_timer(pf, ms);
-	}
 };
 

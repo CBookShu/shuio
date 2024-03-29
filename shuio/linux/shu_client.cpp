@@ -7,69 +7,97 @@
 #include <arpa/inet.h>
 
 namespace shu {
+    struct sclient::sclient_t : std::enable_shared_from_this<sclient_t>
+    {
+        sloop* loop_;
+        addr_storage_t addr_;
+        struct sockaddr_in local_addr_;
+        func_connect_t callback_;
+        std::unique_ptr<ssocket> sock_;
+        std::shared_ptr<sclient_t> holder_;
+        bool stop_;
 
-
-    struct uring_connect_op : uring_callback {
-        uring_ud_io_t complete;
-        ssocket* sock;
-        sloop* loop;
-
-        addr_storage_t remote_addr;
-        struct sockaddr_in local_addr;
-        connect_runable* cb;
-
-        ~uring_connect_op() {
-            if(sock) {
-                delete sock;
-            }
+        sclient_t(sloop* loop, func_connect_t&& callback, addr_storage_t addr) {
+            loop_ = loop;
+            stop_ = false;
+            addr_ = addr;
+            callback_ = std::forward<func_connect_t>(callback);
         }
 
-        void post_connect() {
-            // 进行connect操作
-            io_uring_push_sqe(loop, [&](io_uring* ring){
-                auto* navite_sock = navite_cast_ssocket(sock);
+        void start() {
+            sock_ = std::make_unique<ssocket>();
+            sock_->init(addr_.udp);
+            navite_fd_setcallback(sock_.get(), [this](io_uring_cqe* cqe){
+                run(cqe);
+            });
+
+            io_uring_push_sqe(loop_, [&](io_uring* ring){
+                auto* navite_sock = navite_cast_ssocket(sock_.get());
                 auto* sqe = io_uring_get_sqe(ring);
-                storage_2_sockaddr(&remote_addr, &local_addr);
-                io_uring_prep_connect(sqe, navite_sock->fd, (struct sockaddr*)&local_addr, sizeof(sockaddr_in));
-                io_uring_sqe_set_data(sqe, &complete);
+                storage_2_sockaddr(&addr_, &local_addr_);
+                io_uring_prep_connect(sqe, navite_sock->fd, (struct sockaddr*)&local_addr_, sizeof(sockaddr_in));
+                io_uring_sqe_set_data(sqe, &navite_sock->tag);
                 io_uring_submit(ring);
             });
+
+            holder_ = shared_from_this();
         }
 
-        virtual void run(io_uring_cqe* cqe) noexcept override {
+        void run(io_uring_cqe* cqe) {
             if(cqe->res < 0) {
-                socket_io_result res{.err = 1, .naviteerr = cqe->res};
-                cb->run(res, nullptr, {});
-                cb->destroy();
-                delete this;
+                socket_io_result res{.bytes = 0, .err = 1, .naviteerr = cqe->res};
+                callback_(res, nullptr, addr_pair_t{.remote = addr_,.local = {}});
             } else {
-                socket_io_result res{.err = 0};
-                auto* tmp = std::exchange(sock, nullptr);
-                addr_pair_t addr_pair;
-                addr_pair.remote = remote_addr;
-                sockaddr_2_storage(&local_addr, &addr_pair.local);
-                cb->run(res, tmp, addr_pair);
-                cb->destroy();
-                delete this;
+                socket_io_result res{.bytes = 0, .err = 0, .naviteerr = 0};
+                struct sockaddr_in addr;
+                socklen_t len = sizeof(addr);
+                auto* navite_sock = navite_cast_ssocket(sock_.get());
+                addr_pair_t addr_pair{
+                    .remote = addr_
+                };
+                if (0 == getsockname(navite_sock->fd, (struct sockaddr*)&addr, &len)) {
+                    sockaddr_2_storage(&addr, &addr_pair.local);
+                }
+                callback_(res, std::move(sock_), addr_pair);
             }
+
+            holder_.reset();
+        }
+
+        void stop() {
+
         }
     };
+    
 
-    void shu_connect(sloop* loop, 
-    addr_storage_t saddr, 
-    connect_runable* cb) 
+    sclient::sclient()
+    {}
+    sclient::sclient(sclient&& other) noexcept
     {
-        loop->dispatch_f([loop,saddr,cb]() {
-            auto* op = new uring_connect_op{};
-            op->loop = loop;
-            op->remote_addr = saddr;
-            op->cb =cb;
-            op->complete.type = op_type::type_io;
-            op->complete.cb = op;
-            op->sock = new ssocket({});
-            op->sock->init(0);
+        s_.swap(other.s_);
+    }
+    sclient::~sclient()
+    {
+        auto sptr = s_.lock();
+        if (sptr) {
 
-            op->post_connect();
+        }
+    }
+    void sclient::start(sloop* loop, addr_storage_t saddr, func_connect_t&& cb)
+    {
+        auto sptr = std::make_shared<sclient_t>(loop, std::forward<func_connect_t>(cb), saddr);
+        s_ = sptr;
+        loop->dispatch([sptr]() {
+            sptr->start();
         });
     }
+    void sclient::stop()
+    {
+        if (auto sptr = s_.lock()) {
+            sptr->loop_->dispatch([sptr]() {
+                sptr->stop();
+            });
+        }
+    }
+
 };

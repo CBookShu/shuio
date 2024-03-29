@@ -1,134 +1,139 @@
 #include "shuio/shu_server.h"
 #include "linux_detail.h"
 #include "shuio/shu_socket.h"
+#include "shuio/shu_loop.h"
 
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 namespace shu {
     struct acceptor;
-    struct sserver::sserver_t {
-		sloop* loop;
-		ssocket* sock;
-		sserver_opt opt;
-		acceptor* accept;
-    };
+    struct sserver::sserver_t : std::enable_shared_from_this<sserver_t>{
+		sloop* loop_;
+		std::unique_ptr<ssocket> sock_;
+        sserver::func_newclient_t creator_;
+        struct sockaddr_in addr_in_client_;
+        socklen_t addr_size_ = sizeof(addr_in_client_);
+        addr_storage_t addr_;
+        bool stop_;
 
-    struct acceptor : uring_callback {
-        uring_ud_io_t complete;
-        struct sockaddr_in addr_in_client;
-        socklen_t addr_size = sizeof(addr_in_client);
-        sserver_runnable* user_callback;
-        sserver* server;
-        
-        void init() {
-            complete.type = op_type::type_io;
-            complete.cb = this;
+        std::shared_ptr<sserver::sserver_t> holder_;
+
+        sserver_t(sloop* loop, sserver::func_newclient_t creator, addr_storage_t addr) {
+            addr_ = addr;
+            loop_ = loop;
+            creator_ = creator;
+            stop_ = false;
+        }
+
+        void start() {
+			// 先创建 sock和对应的bind和listen
+			sock_ = std::make_unique<ssocket>();
+			sock_->init(addr_.udp == 1);
+			sock_->reuse_addr(true);
+			sock_->noblock(true);
+
+			if (!addr_.udp) {
+				if (!sock_->bind(addr_)) {
+					return;
+				}
+				if (!sock_->listen()) {
+					return;
+				}
+			}
+			else {
+				// TODO: UDP 直接进行read操作
+			}
+            navite_fd_setcallback(sock_.get(), [this](io_uring_cqe* cqe){
+                run(cqe);
+            });
             post_accept();
+            holder_ = shared_from_this();
         }
 
         void post_accept() {
-            std::memset(&addr_in_client, 0, sizeof(addr_in_client));
-            io_uring_push_sqe(server->loop(), [&](io_uring* ring){
-                auto* navie_sock = navite_cast_ssocket(server->sock());
+            memset(&addr_in_client_, 0, sizeof(addr_in_client_));
+            io_uring_push_sqe(loop_, [&](io_uring* ring){
+                auto* navie_sock = navite_cast_ssocket(sock_.get());
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                io_uring_prep_accept(sqe, navie_sock->fd, (struct sockaddr*)&addr_in_client, &addr_size, 0);
-                io_uring_sqe_set_data(sqe, &complete);
+                io_uring_prep_accept(sqe, navie_sock->fd, (struct sockaddr*)&addr_in_client_, &addr_size_, 0);
+                io_uring_sqe_set_data(sqe, &navie_sock->tag);
                 io_uring_submit(ring);
             });
         }
 
-        void run(io_uring_cqe* cqe) noexcept override {
+        void run(io_uring_cqe* cqe) {
             // 有链接过来
             socket_io_result_t res{ .err = 0};
-            ssocket* sock = nullptr;
+            std::unique_ptr<ssocket> sock;
             if(cqe->res >= 0) {
                 // 有效值
-                sock = new ssocket({});
-                auto* navie_sock = navite_cast_ssocket(sock);
+                sock.reset(new ssocket({}));
+                auto* navie_sock = navite_cast_ssocket(sock.get());
                 navie_sock->fd = cqe->res;
             } else {
                 res.err = 1;
                 res.naviteerr = cqe->res;
             }
             addr_pair_t addr;
-			addr.remote.port = ntohs(addr_in_client.sin_port);
-			inet_ntop(AF_INET, &addr_in_client.sin_addr, addr.remote.ip, std::size(addr.remote.ip)-1);
-			addr.remote.iptype = server->option()->addr.iptype;
+			addr.remote.port = ntohs(addr_in_client_.sin_port);
+            addr.remote.ip.resize(64);
+			inet_ntop(AF_INET, &addr_in_client_.sin_addr, addr.remote.ip.data(), addr.remote.ip.size());
+			addr.remote.udp = addr_.udp;
 
-			addr.local = server->option()->addr;
-            user_callback->new_client(res, server, sock, addr);
+			addr.local = addr_;
+            creator_(res, std::move(sock), addr);
 
             post_accept();
         }
 
+        void stop() {
+            if (std::exchange(stop_, true)) {
+                return;
+            }
+
+            io_uring_push_sqe(loop_, [&](io_uring* ring){
+                auto* navie_sock = navite_cast_ssocket(sock_.get());
+                struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+                io_uring_prep_cancel_fd(sqe, navie_sock->fd, 0);
+                io_uring_submit(ring);
+            });
+            sock_->close();
+            auto self = shared_from_this();
+            loop_->post([self](){
+                self->holder_.reset();
+            });
+        }
     };
 
-    sserver::sserver(sserver_opt opt) {
-        _s = new sserver_t{};
-        _s->opt = opt;
+    sserver::sserver() {
     }
 
     sserver::sserver(sserver&& other) noexcept
 	{
-		_s = std::exchange(other._s, nullptr);
+        s_.swap(other.s_);
 	}
 
     sserver::~sserver() {
-        if(!_s) return;
-        if(_s->sock) {
-            delete _s->sock;
-        }
-        if(_s->accept) {
-            if(_s->accept->user_callback) {
-                _s->accept->user_callback->destroy();
-            }
-            delete _s->accept;
+        if(auto sptr = s_.lock()) {
+            
         }
     }
 
-    auto sserver::option() -> const sserver_opt* {
-        return &_s->opt;
+    void sserver::start(sloop* loop, func_newclient_t&& creator, addr_storage_t addr) {
+        auto sptr = std::make_shared<sserver_t>(loop, std::forward<func_newclient_t>(creator), addr);
+        s_ = sptr;
+
+        loop->dispatch([sptr](){
+            sptr->start();
+        });
     }
 
-    auto sserver::loop() -> sloop* {
-        return _s->loop;
-    }
-
-    auto sserver::sock() -> ssocket* {
-        return _s->sock;
-    }
-
-    auto sserver::start(sloop* loop, sserver_runnable* r,addr_storage_t addr) -> bool {
-        _s->loop = loop;
-        _s->sock = new ssocket({});
-        _s->sock->init(addr.iptype);
-		_s->sock->reuse_addr(true);
-		// _s->sock->noblock(true);
-        _s->accept = new acceptor{};
-        _s->accept->server = this;
-        _s->accept->user_callback = r;
-        _s->opt.addr = addr;
-        
-        struct sockaddr_in serv_addr{};
-        serv_addr.sin_family = AF_INET;
-        serv_addr.sin_port = htons(addr.port);
-        serv_addr.sin_addr.s_addr = INADDR_ANY;
-        if(::inet_pton(AF_INET, addr.ip, &(serv_addr.sin_addr)) != 1) {
-            perror("addr error");
-            exit(1);
+    void sserver::stop() {
+        if(auto sptr = s_.lock()) {
+            sptr->loop_->dispatch([sptr](){
+                sptr->stop();
+            });
         }
-
-        auto* navie_sock = navite_cast_ssocket(_s->sock);
-        if(::bind(navie_sock->fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-            perror("bind error");
-            exit(1);
-        }
-
-        if(::listen(navie_sock->fd, 512) < 0) {
-            perror("listen error");
-            exit(1);
-        }
-        _s->accept->init();
     }
 };

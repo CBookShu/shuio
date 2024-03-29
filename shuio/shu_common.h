@@ -5,30 +5,19 @@
 #include <iostream>
 #include <concepts>
 
+#include <functional>
+#include <source_location>
+
 namespace shu {
 
 #define S_DISABLE_COPY(T)	\
 	T(T&) = delete;\
 	T& operator = (T&) = delete;\
-	T& operator = (T&&) = delete;\
-
-#define S_FIX(msg)	static_assert(true, msg)
-
-	template <typename T>
-	requires requires {!std::is_pointer_v<T>;}
-	static void s_copy(T&& d, T&& s) {
-		d = std::forward<T&&>(s);
-	}
-	template <typename D, typename S>
-	requires requires {std::is_pod_v<D>;std::is_pod_v<S>;sizeof(D)==sizeof(S);}
-	static void s_copy(D&& d, S&& s) {
-		std::memcpy(&d, &s, sizeof(d));
-	}
 
 	template <typename F>
 	struct s_defer {
 		F f;
-		s_defer(auto&& cb):f(std::move(cb)) {}
+		s_defer(F&& cb):f(std::forward<F>(cb)) {}
 		~s_defer() {
 			f();
 		}
@@ -42,9 +31,9 @@ namespace shu {
 #define S_DEFER(exp)	s_defer_make([&](){exp});
 
 	typedef struct addr_storage_t {
-		int iptype;//0 tcp,1 udp
-		std::uint64_t port;
-		char ip[64];
+		bool udp;//0 tcp,1 udp
+		int port;
+		std::string ip;
 	}addr_storage_t;
 
 	typedef struct addr_pair_t {
@@ -57,6 +46,20 @@ namespace shu {
 		std::int32_t err;		// 本次操作是否有错误0 无错误
 		std::int32_t naviteerr;	// win: wsagetlasterror, unix:errno
 	}socket_io_result;
+
+	using func_t = std::function<void()>;
+
+	// tool for variant
+	template<class... Ts> struct overload : Ts... { using Ts::operator()...; };
+	template<class... Ts> overload(Ts...) -> overload<Ts...>;
+
+	// exception check
+	// TODO: C++23 add stacktrace
+	void exception_check(
+		bool con,
+		std::string_view msg = {},
+		std::source_location call = std::source_location::current()
+	) noexcept;
 
 	int s_last_error();
 

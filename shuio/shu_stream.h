@@ -1,5 +1,6 @@
 #pragma once
 #include "shu_common.h"
+#include "shu_buffer.h"
 #include <memory>
 #include <span>
 
@@ -20,43 +21,35 @@ namespace shu {
 	class sloop;
 	class ssocket;
 	class socket_buffer;
-	struct sstream_runable;
-	class sstream : public std::enable_shared_from_this<sstream>
+	struct read_ctx_t {
+		socket_buffer& buf;
+	};
+	struct write_ctx_t {
+		std::vector<socket_buffer>& bufs;
+	};
+	class sstream
 	{
 		struct sstream_t;
-		sstream_t* _s;
+		std::weak_ptr<sstream_t> s_;
 		S_DISABLE_COPY(sstream);
 	public:
-		using SPtr = std::shared_ptr<sstream>;
-		sstream(sloop*,ssocket*,sstream_opt opt);
+
+		using func_read_t = std::function<void(socket_io_result_t, read_ctx_t&)>;
+		using func_write_t = std::function<void(socket_io_result_t, write_ctx_t&)>;
+
+		sstream();
 		sstream(sstream&&) noexcept;
 		~sstream();
 
-		auto handle() -> struct sstream_t*;
-		auto option() -> const sstream_opt*;
-		auto option() const -> const sstream_opt*;
-		auto loop() -> sloop*;
-		auto sock() -> ssocket*;
-
-		auto readbuffer() -> socket_buffer*;
-		auto writebuffer() -> std::span< socket_buffer*>;
-
 		// just call once after new
-		auto start_read(sstream_runable*) -> void;
-		// call after start read
-		auto write(socket_buffer*) -> bool;
-		// call after start read
-		auto close() -> void;
-	};
+		void start(
+			sloop*, ssocket*, sstream_opt opt, 
+			func_read_t&& rcb, func_write_t&& wcb);
 
-	struct sstream_runable {
-		virtual ~sstream_runable() {}
-		virtual void on_read(socket_io_result_t, sstream::SPtr) noexcept = 0;
-		virtual void on_write(socket_io_result_t, sstream::SPtr) noexcept = 0;
-		virtual void on_close(const sstream*) noexcept = 0;
-		virtual void destroy() noexcept {
-			delete this;
-		}
+		// call after start read
+		void write(socket_buffer&& );
+		// call after start read
+		void stop();
 	};
 };
 

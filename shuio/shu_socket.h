@@ -5,6 +5,7 @@
 
 namespace shu {
 
+	class sloop;;
 	typedef union ssocket_opt {
 		std::uint32_t data;
 		struct {
@@ -16,25 +17,36 @@ namespace shu {
 		}flags;
 	}ssocket_opt;
 
+	enum shutdown_type {
+		shutdown_read,
+		shutdown_write,
+		shutdown_both,
+	};
+
 	class ssocket
 	{
 		struct ssocket_t;
-		ssocket_t* _ss;
+		ssocket_t* ss_;
 		S_DISABLE_COPY(ssocket);
 	public:
-		ssocket(ssocket_opt opt);
+		ssocket();
 		ssocket(ssocket&& other)  noexcept;
 		~ssocket();
 
 		auto handle() -> ssocket_t*;
 
 		// iptype: 0 tcp, 1 udp
-		auto init(int iptype) -> bool;
+		void init(bool udp);
 		auto option() -> const ssocket_opt*;
 		auto noblock(bool) -> bool;
 		auto reuse_addr(bool) -> bool;
 		auto reuse_port(bool) -> bool;	// win32 应该是不支持的
 		auto nodelay(bool) -> bool;
+		auto bind(addr_storage_t addr) -> bool;
+		auto listen() -> bool;
+		void close();
+		bool valid();
+		void shutdown(shutdown_type how = shutdown_both);
 	};
 };
 

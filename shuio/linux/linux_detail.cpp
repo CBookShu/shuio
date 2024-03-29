@@ -4,8 +4,8 @@
 
 namespace shu {
 
-    auto navite_cast_ssocket(ssocket* s) -> sock_navite_t* {
-        return reinterpret_cast<sock_navite_t*>(s->handle());
+    auto navite_cast_ssocket(ssocket* s) -> fd_navite_t* {
+        return reinterpret_cast<fd_navite_t*>(s->handle());
     }
     auto navite_cast_sloop(sloop *loop) -> uring_navite_t *
     {
