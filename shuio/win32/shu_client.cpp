@@ -45,7 +45,6 @@ namespace shu {
             addr_storage_t bind_addr;
             bind_addr.port = 0;
             bind_addr.udp = false;
-            bind_addr.ip[0] = '\0';
             if (!sock_->bind(bind_addr)) {
                 auto err = s_last_error();
                 socket_io_result res{ .bytes = 0, .err = 1, .naviteerr = err };
