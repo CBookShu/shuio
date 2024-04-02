@@ -99,13 +99,6 @@ namespace shu {
 
             auto* navite_sock = navite_cast_ssocket(sock_.get());
             ::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &connector_);
-            loop_->post([self = shared_from_this()] (){
-                // 下一帧释放自己
-                self->hold_.reset();
-
-                socket_io_result res{ .bytes = 0, .err = -1, .naviteerr = 0};
-                self->callback_(res, nullptr, {});
-            });
         }
     };
 

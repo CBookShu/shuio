@@ -6,26 +6,26 @@
 
 namespace shu {
 
-	struct acceptor_complete_t : OVERLAPPED {
-		enum { buffer_size = (sizeof(sockaddr) + 16) * 2 };
-
-		std::unique_ptr<ssocket> sock_;
-		char buffer_[buffer_size];
-
-		acceptor_complete_t() {
-			std::memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
-		}
-	};
-
 	struct sserver::sserver_t : std::enable_shared_from_this<sserver::sserver_t> {
+		struct acceptor_complete_t : OVERLAPPED {
+			enum { buffer_size = (sizeof(sockaddr) + 16) * 2 };
+
+			std::unique_ptr<ssocket> sock_;
+			char buffer_[buffer_size];
+
+			std::shared_ptr<sserver::sserver_t> holder_;
+
+			acceptor_complete_t() {
+				std::memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
+			}
+		};
+		
 		sloop* loop_;
 		std::unique_ptr<ssocket> sock_;
 		addr_storage_t addr_;
 		sserver::func_newclient_t creator_;
-		acceptor_complete_t accept_op[4];
+		acceptor_complete_t accept_op[1];
 		bool stop_;
-
-		std::shared_ptr<sserver::sserver_t> holder_;
 
 		sserver_t(sloop* loop, sserver::func_newclient_t&& creator, addr_storage_t addr) {
 			loop_ = loop;
@@ -63,17 +63,18 @@ namespace shu {
 			});
 
 			for (auto& acceptor : accept_op) {
+				acceptor.holder_ = shared_from_this();
 				if (!post_acceptor(&acceptor)) {
 					stop();
 					return;
 				}
 			}
-
-			holder_ = shared_from_this();
 			return ;
 		}
 
 		bool post_acceptor(acceptor_complete_t* acceptor) {
+			auto tmp(std::move(acceptor->holder_));
+
 			acceptor->sock_ = std::make_unique<ssocket>();
 			acceptor->sock_->init(addr_.udp);
 
@@ -93,6 +94,7 @@ namespace shu {
 					return false;
 				}
 			}
+			acceptor->holder_.swap(tmp);
 			return true;
 		}
 
@@ -123,9 +125,13 @@ namespace shu {
 
 			socket_io_result_t res{ .err = 0 };
 			creator_(res, std::move(op->sock_), addr);
-			if (!post_acceptor(op)) {
+
+			if (stop_) {
+				op->holder_.reset();
+			}
+			else if(!post_acceptor(op)) {
 				// error 
-				socket_io_result_t res_err{ .err = 1, .naviteerr = s_last_error()};
+				socket_io_result_t res_err{ .err = 1, .naviteerr = s_last_error() };
 				creator_(res_err, nullptr, {});
 				stop();
 			}
@@ -141,10 +147,6 @@ namespace shu {
 				::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &acceptor);
 			}
 			sock_->close();
-			auto self = shared_from_this();
-			loop_->post([this, self] {
-				this->holder_.reset();
-			});
 		}
 	};
 

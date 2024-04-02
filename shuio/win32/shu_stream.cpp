@@ -208,11 +208,6 @@ namespace shu {
 			::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
 			::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &writer_);
 			sock_->close();
-			loop_->post([this, self = shared_from_this()]() {
-				// 下一帧释放自己
-				this->read_hold_.reset();
-				this->write_hold_.reset();
-			});
 		}
 	};
 	
