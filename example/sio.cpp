@@ -15,108 +15,143 @@
 using namespace shu;
 using namespace std;
 
+struct hash_addr_storage_t {
+    std::size_t operator ()(const addr_storage_t& addr) const {
+        return std::hash<std::string>()(addr.ip) ^ std::hash<int>()(addr.port);
+    }
+};
+
+struct equal_addr_storage_t {
+    bool operator()(const addr_storage_t& a, const addr_storage_t& b) const {
+        return std::tie(a.ip, a.port) == std::tie(b.ip, b.port);
+    }
+};
+
+class tcp_client {
+public:
+    tcp_client(sloop& loop, addr_storage_t addr):loop_(loop) {
+        sclient client;
+        client.start(&loop_, addr, [this](socket_io_result_t res, std::unique_ptr<ssocket> sock, addr_pair_t addr) mutable {
+            if (res.err) {
+                std::cout << "client connect error:" << res.naviteerr << std::endl;
+                return;
+            }
+
+            sstream stream;
+            stream.start(&loop_, sock.release(), { .addr = addr }, [this](socket_io_result_t res, read_ctx_t& r) {
+                on_read(res, r);
+            },
+                [this](socket_io_result_t res, write_ctx_t& w) {
+                on_write(res, w);
+            });
+            stream_.emplace(std::move(stream));
+            on_connect();
+        });
+    }
+
+    void write(socket_buffer buff) {
+        if (stream_) {
+            buff.commit();
+            stream_.value().write(std::move(buff));
+        }
+    }
+
+    void on_connect() {
+        socket_buffer buff("hello world");
+        write(std::move(buff));
+    }
+
+    void on_read(socket_io_result_t res, read_ctx_t& r) {
+        if (res.err) {
+            std::cout << "read err:" << res.naviteerr << endl;
+            stream_.reset();
+            return;
+        }
+        auto rd = r.buf.ready();
+        std::string_view str(rd.data(), rd.size());
+        std::cout << "client read:" << str << std::endl;
+        r.buf.commit(rd.size());
+    }
+
+    void on_write(socket_io_result_t res, write_ctx_t& w) {
+
+    }
+private:
+    sloop& loop_;
+    std::optional<sstream> stream_;
+};
+
+class tcp_server {
+public:
+    tcp_server(sloop& loop, addr_storage_t addr) :loop_(loop) {
+        server_.start(&loop_, 
+            [this](socket_io_result_t res,
+                std::unique_ptr<ssocket> sock,
+                addr_pair_t addr) {
+            on_client(res, std::move(sock), addr);
+        }, addr);
+    }
+
+    ~tcp_server() {
+        server_.stop();
+    }
+
+    void on_client(socket_io_result_t res,
+        std::unique_ptr<ssocket> sock,
+        addr_pair_t addr) {
+        if (res.err) {
+            std::cout << "tcp server err:" << res.naviteerr << std::endl;
+            return;
+        }
+
+        sstream stream;
+        stream.start(&loop_, sock.release(), {.addr = addr}, 
+            [addr, this](socket_io_result_t res, read_ctx_t& r) {
+            on_read(addr, res, r);
+        }, 
+        [addr, this](socket_io_result_t res, write_ctx_t& w) {
+            on_write(addr, res, w);
+        });
+        streams_.emplace( addr.remote, std::move(stream) );
+    }
+    
+    void on_read(addr_pair_t addr, socket_io_result_t res, read_ctx_t& r) {
+        if (res.err) {
+            std::cout << "read err:" << res.naviteerr << endl;
+            auto it = streams_.find(addr.remote);
+            if (it != streams_.end()) {
+                it->second.stop();
+                streams_.erase(it);
+            }
+            loop_.stop();
+            return;
+        }
+        auto rd = r.buf.ready();
+        std::string_view str(rd.data(), rd.size());
+        std::cout << "server read:" << str << std::endl;
+        r.buf.consume(rd.size());
+
+        auto it = streams_.find(addr.remote);
+        if (it != streams_.end()) {
+            socket_buffer buf(str);
+            buf.commit();
+            it->second.write(std::move(buf));
+        }
+    }
+
+    void on_write(addr_pair_t addr, socket_io_result_t res, write_ctx_t& w) {
+
+    }
+private:
+    sloop& loop_;
+    sserver server_;
+    std::unordered_map<addr_storage_t, sstream, hash_addr_storage_t, equal_addr_storage_t> streams_;
+};
+
 void start_server() {
     sloop l({});
-    sserver svr;
-
-    sstream server_stream;
-    auto server_stream_read = [&](socket_io_result_t res, read_ctx_t& r) {
-        if (res.err) {
-            //std::cout << "read err:" << res.naviteerr << endl;
-            return;
-        }
-
-        auto rd = r.buf.ready();
-        std::string_view str(rd.data(), rd.size());
-        //std::cout << "server: " << str << endl;
-
-        for (int i = 0; i < 10; ++i) {
-            socket_buffer buf(rd.size());
-            buf.prepare(rd).commit();
-            server_stream.write(std::move(buf));
-        }
-        r.buf.consume(rd.size());
-    };
-    auto server_stream_write = [](socket_io_result_t res, write_ctx_t& w) {
-        if (res.err) {
-            //std::cout << "write err:" << res.naviteerr << endl;
-            return;
-        }
-        //std::cout << "client write" << std::endl;
-    };
-
-    auto acceptr_cb = [&](socket_io_result_t res,
-        std::unique_ptr<ssocket> sock, 
-        addr_pair_t addr) {
-        if (res.err) {
-            //std::cout << "accept err:" << res.naviteerr << std::endl;
-            return;
-        }
-
-        //std::cout << "new client:" 
-        //    << addr.remote.ip 
-        //    << "[" << addr.remote.port << "]" << endl;
-
-        sstream_opt opt = { .addr = addr };
-        server_stream.start(&l, sock.release(), opt, server_stream_read, server_stream_write);
-
-        l.add_timer([&]() {
-            server_stream.stop();
-            l.stop();
-        }, 5s);
-    };
-
-
-    addr_storage_t addr_server{ .udp = false, .port = 5990, .ip = {"0.0.0.0"} };
-    svr.start(&l, acceptr_cb, addr_server);
-
-    l.add_timer([&svr]() {
-        svr.stop();
-    }, 2s);
-
-    sstream client_stream;
-    auto client_stream_read = [](socket_io_result_t res, read_ctx_t& r) {
-        if (res.err) {
-            std::cout << "client read error:" << res.naviteerr << std::endl;
-            return;
-        }
-
-        auto rd = r.buf.ready();
-        std::string_view str(rd.data(), rd.size());
-        //std::cout << "client: " << str << endl;
-        r.buf.consume(rd.size());
-    };
-    auto client_stream_write = [](socket_io_result_t res, write_ctx_t& w) {
-        
-    };
-
-    auto connect_cb = [&l,&client_stream, client_stream_read, client_stream_write](socket_io_result res,
-        std::unique_ptr<ssocket> sock, 
-        addr_pair_t addr) {
-        
-        if (res.err) {
-            //std::cout << "client connect err:" << res.naviteerr << std::endl;
-            return;
-        }
-        sstream_opt opt = { .addr = addr };
-        client_stream.start(&l, sock.release(), opt, client_stream_read, client_stream_write);
-
-        l.add_timer([&client_stream]() {
-            const char* s = "hello svr";
-            socket_buffer buf(strlen(s));
-            buf.prepare(s).commit();
-            client_stream.write(std::move(buf));
-            //client_stream.stop();
-        }, 1s);
-
-        l.add_timer([&client_stream]() {
-            //client_stream.stop();
-        }, 2s);
-    };
-
-    sclient client;
-    addr_storage_t addr_conn{ .udp = false, .port = 5990, .ip = {"127.0.0.1"} };
-    client.start(&l, addr_conn, connect_cb);
+    tcp_server server(l, {.udp = false, .port = 5990});
+    //tcp_client client(l, { .udp = false, .port = 5990, .ip = {"127.0.0.1"} });
     l.run();
 }
 

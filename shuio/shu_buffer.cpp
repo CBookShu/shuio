@@ -95,6 +95,18 @@ namespace shu {
 		return c;
 	}
 
+	socket_buffer::socket_buffer(const char* s):socket_buffer(strlen(s)){
+		prepare(s);
+	}
+
+	socket_buffer::socket_buffer(std::string_view s) :socket_buffer(s.size()) {
+		prepare(s);
+	}
+
+	socket_buffer::socket_buffer(const std::string& s) :socket_buffer(s.size()) {
+		prepare(s);
+	}
+
 	socket_buffer::socket_buffer(std::size_t sz) {
 		data_ = (buffer_t*)::malloc(sizeof(buffer_t) + sz);
 		if (data_) [[likely]] {

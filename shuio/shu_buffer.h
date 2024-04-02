@@ -32,6 +32,9 @@ namespace shu {
 
 		socket_buffer copy();
 
+		socket_buffer(const char* s);
+		socket_buffer(std::string_view s);
+		socket_buffer(const std::string& s);
 		socket_buffer(std::size_t sz);
 		socket_buffer(socket_buffer&& other) noexcept;
 		socket_buffer& operator = (socket_buffer&&) noexcept;
