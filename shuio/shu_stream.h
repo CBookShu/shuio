@@ -12,8 +12,8 @@ namespace shu {
 		std::size_t read_buffer_limit = 1024 * 1024 * 20;
 		std::size_t write_buffer_limit = 1024 * 1024 * 20;
 		// 读写缓存初始大小
-		std::size_t read_buffer_init = 4096;
-		std::size_t write_buffer_init = 4096;
+		std::size_t read_buffer_init = 1024;
+		std::size_t write_buffer_init = 1024;
 		// 每次读的大小
 		std::size_t read_buffer_count_per_op = 4096;
 	};

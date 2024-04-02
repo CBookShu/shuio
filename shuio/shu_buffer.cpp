@@ -1,72 +1,58 @@
 #include "shu_buffer.h"
 #include "shu_common.h"
 #include <cstring>
+#include <vector>
 
 namespace shu {
-	extern "C" {
-		struct socket_buffer::buffer_t {
-			std::size_t sz;
-			std::size_t pos;
-			char data[0];
-		};
-	}
-
 	std::size_t socket_buffer::size()
 	{
-		return data_->sz;
+		return data_.size();
 	}
 
 	char* socket_buffer::cast() {
-		return data_->data;
+		return data_.data();
 	}
 
 	std::span<char> socket_buffer::ready()
 	{
-		return std::span<char>(cast(), data_->pos);
+		return std::span<char>(cast(), pos_);
 	}
 
 	std::span<char> socket_buffer::prepare(std::size_t sz) {
-		if (data_->sz < (sz + data_->pos)) {
-			auto* p = ::realloc(data_, sizeof(buffer_t) + sz + data_->pos);
-			assert(p);
-			shu::exception_check(p, "oom");
-			data_ = reinterpret_cast<buffer_t*>(p);
-			data_->sz = sz + data_->pos;
+		if (data_.size() < (sz + pos_)) {
+			data_.resize(pos_ + sz);
 		}
 		return prepare();
 	}
 
 	std::span<char> socket_buffer::prepare()
 	{
-		return std::span<char>(cast() + data_->pos, data_->sz - data_->pos);
+		return std::span<char>(cast() + pos_, data_.size() - pos_);
 	}
 
 	void socket_buffer::compress(std::size_t sz)
 	{
-		auto* p = ::realloc(data_, sizeof(buffer_t) + sz);
-		assert(p);
-		shu::exception_check(p, "oom");
-		data_ = reinterpret_cast<buffer_t*>(p);
-		data_->sz = sz;
+		data_.resize(sz);
+		pos_ = std::min(sz, pos_);
 	}
 
 	std::size_t socket_buffer::commit(std::size_t sz) {
 		if (sz == 0) return 0;
-		sz = std::min<>(sz, data_->sz - data_->pos);
-		data_->pos += sz;
+		sz = std::min<>(sz, data_.size() - pos_);
+		pos_ += sz;
 		return sz;
 	}
 
 	std::size_t socket_buffer::commit()
 	{
-		auto sz = data_->sz - data_->pos;
-		data_->pos = data_->sz;
+		auto sz = data_.size() - pos_;
+		pos_ = data_.size();
 		return sz;
 	}
 
 	std::size_t socket_buffer::consume(std::size_t sz) {
-		sz = std::min<>(sz, data_->pos);
-		data_->pos -= sz;
+		sz = std::min<>(sz, pos_);
+		pos_ -= sz;
 		return sz;
 	}
 
@@ -83,16 +69,6 @@ namespace shu {
 	}
 
 	socket_buffer::~socket_buffer() {
-		if (data_) {
-			::free(data_);
-		}
-	}
-
-	socket_buffer socket_buffer::copy()
-	{
-		socket_buffer c(data_->sz);
-		std::memcpy(c.data_, data_, data_->sz + sizeof(buffer_t));
-		return c;
 	}
 
 	socket_buffer::socket_buffer(const char* s):socket_buffer(strlen(s)){
@@ -107,28 +83,19 @@ namespace shu {
 		prepare(s);
 	}
 
-	socket_buffer::socket_buffer(std::size_t sz) {
-		data_ = (buffer_t*)::malloc(sizeof(buffer_t) + sz);
-		if (data_) [[likely]] {
-			data_->sz = sz;
-			data_->pos = 0;
-		}
-		else {
-			// 内存不足?
-			::abort();
-		}
+	socket_buffer::socket_buffer(std::size_t sz):data_(sz),pos_(0) {
+		
 	}
 
 	socket_buffer::socket_buffer(socket_buffer&& other) noexcept
 	{
-		data_ = std::exchange(other.data_, nullptr);
+		data_ = std::exchange(other.data_, {});
+		pos_ = std::exchange(other.pos_, 0);
 	}
 
 	socket_buffer& socket_buffer::operator=(socket_buffer&& other) noexcept {
-		if (data_) {
-			::free(data_);
-		}
-		data_ = std::exchange(other.data_, nullptr);
+		std::swap(data_, other.data_);
+		std::swap(pos_, other.pos_);
 		return *this;
 	}
 

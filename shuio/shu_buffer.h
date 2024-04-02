@@ -2,12 +2,13 @@
 #include <iostream>
 #include <cassert>
 #include <span>
+#include <vector>
 
 namespace shu {
 
 	class socket_buffer {
-		struct buffer_t;
-		buffer_t* data_;
+		std::vector<char> data_;
+		std::size_t pos_;
 	public:
 		std::size_t size();
 		char* cast();
@@ -28,9 +29,6 @@ namespace shu {
 		std::size_t commit();
 		// pos-=sz
 		std::size_t consume(std::size_t sz);
-
-
-		socket_buffer copy();
 
 		socket_buffer(const char* s);
 		socket_buffer(std::string_view s);
