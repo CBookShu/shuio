@@ -22,13 +22,13 @@ void start_server() {
     sstream server_stream;
     auto server_stream_read = [&](socket_io_result_t res, read_ctx_t& r) {
         if (res.err) {
-            std::cout << "read err:" << res.naviteerr << endl;
+            //std::cout << "read err:" << res.naviteerr << endl;
             return;
         }
 
         auto rd = r.buf.ready();
         std::string_view str(rd.data(), rd.size());
-        std::cout << "server: " << str << endl;
+        //std::cout << "server: " << str << endl;
 
         for (int i = 0; i < 10; ++i) {
             socket_buffer buf(rd.size());
@@ -39,31 +39,40 @@ void start_server() {
     };
     auto server_stream_write = [](socket_io_result_t res, write_ctx_t& w) {
         if (res.err) {
-            std::cout << "write err:" << res.naviteerr << endl;
+            //std::cout << "write err:" << res.naviteerr << endl;
             return;
         }
-        std::cout << "client write" << std::endl;
+        //std::cout << "client write" << std::endl;
     };
 
     auto acceptr_cb = [&](socket_io_result_t res,
         std::unique_ptr<ssocket> sock, 
         addr_pair_t addr) {
         if (res.err) {
-            std::cout << "accept err:" << res.naviteerr << std::endl;
+            //std::cout << "accept err:" << res.naviteerr << std::endl;
             return;
         }
 
-        std::cout << "new client:" 
-            << addr.remote.ip 
-            << "[" << addr.remote.port << "]" << endl;
+        //std::cout << "new client:" 
+        //    << addr.remote.ip 
+        //    << "[" << addr.remote.port << "]" << endl;
 
         sstream_opt opt = { .addr = addr };
         server_stream.start(&l, sock.release(), opt, server_stream_read, server_stream_write);
+
+        l.add_timer([&]() {
+            server_stream.stop();
+            l.stop();
+        }, 5s);
     };
 
 
     addr_storage_t addr_server{ .udp = false, .port = 5990, .ip = {"0.0.0.0"} };
     svr.start(&l, acceptr_cb, addr_server);
+
+    l.add_timer([&svr]() {
+        svr.stop();
+    }, 2s);
 
     sstream client_stream;
     auto client_stream_read = [](socket_io_result_t res, read_ctx_t& r) {
@@ -74,7 +83,7 @@ void start_server() {
 
         auto rd = r.buf.ready();
         std::string_view str(rd.data(), rd.size());
-        std::cout << "client: " << str << endl;
+        //std::cout << "client: " << str << endl;
         r.buf.consume(rd.size());
     };
     auto client_stream_write = [](socket_io_result_t res, write_ctx_t& w) {
@@ -86,7 +95,7 @@ void start_server() {
         addr_pair_t addr) {
         
         if (res.err) {
-            std::cout << "client connect err:" << res.naviteerr << std::endl;
+            //std::cout << "client connect err:" << res.naviteerr << std::endl;
             return;
         }
         sstream_opt opt = { .addr = addr };
@@ -97,7 +106,11 @@ void start_server() {
             socket_buffer buf(strlen(s));
             buf.prepare(s).commit();
             client_stream.write(std::move(buf));
-            // client_stream.stop();
+            //client_stream.stop();
+        }, 1s);
+
+        l.add_timer([&client_stream]() {
+            //client_stream.stop();
         }, 2s);
     };
 
@@ -186,9 +199,9 @@ static void pingpong_server(int argc, char** argv) {
 
 int main(int argc, char**argv)
 {
-    // start_server();
+     start_server();
     // start_timer();
-    pingpong_server(argc, argv);
+    //pingpong_server(argc, argv);
     return 0;
 }
 
