@@ -26,6 +26,10 @@ namespace shu {
             stop_ = false;
         }
 
+        ~sserver_t() {
+            
+        }
+
         void start() {
 			// 先创建 sock和对应的bind和listen
 			sock_ = std::make_unique<ssocket>();
@@ -63,6 +67,8 @@ namespace shu {
         }
 
         void run(io_uring_cqe* cqe) {
+            auto tmp = std::move(holder_);
+
             // 有链接过来
             socket_io_result_t res{ .err = 0};
             std::unique_ptr<ssocket> sock;
@@ -71,20 +77,28 @@ namespace shu {
                 sock.reset(new ssocket({}));
                 auto* navie_sock = navite_cast_ssocket(sock.get());
                 navie_sock->fd = cqe->res;
+
+                addr_pair_t addr;
+                addr.remote.port = ntohs(addr_in_client_.sin_port);
+                addr.remote.ip.resize(64);
+                inet_ntop(AF_INET, &addr_in_client_.sin_addr, addr.remote.ip.data(), addr.remote.ip.size());
+                addr.remote.udp = addr_.udp;
+                addr.local = addr_;
+                creator_(res, std::move(sock), addr);
             } else {
                 res.err = 1;
                 res.naviteerr = cqe->res;
+                
+                addr_pair_t addr;
+                addr.local = addr_;
+                addr.remote = {};
+                creator_(res, std::move(sock), addr);
             }
-            addr_pair_t addr;
-			addr.remote.port = ntohs(addr_in_client_.sin_port);
-            addr.remote.ip.resize(64);
-			inet_ntop(AF_INET, &addr_in_client_.sin_addr, addr.remote.ip.data(), addr.remote.ip.size());
-			addr.remote.udp = addr_.udp;
-
-			addr.local = addr_;
-            creator_(res, std::move(sock), addr);
-
+            if (stop_) {
+                return;
+            }
             post_accept();
+            holder_.swap(tmp);
         }
 
         void stop() {
@@ -99,10 +113,6 @@ namespace shu {
                 io_uring_submit(ring);
             });
             sock_->close();
-            auto self = shared_from_this();
-            loop_->post([self](){
-                self->holder_.reset();
-            });
         }
     };
 

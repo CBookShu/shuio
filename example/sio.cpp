@@ -11,6 +11,7 @@
 #include <chrono>
 #include <functional>
 #include <charconv>
+#include <optional>
 
 using namespace shu;
 using namespace std;
@@ -113,6 +114,8 @@ public:
             on_write(addr, res, w);
         });
         streams_.emplace( addr.remote, std::move(stream) );
+
+        server_.stop();
     }
     
     void on_read(addr_pair_t addr, socket_io_result_t res, read_ctx_t& r) {
@@ -234,7 +237,7 @@ static void pingpong_server(int argc, char** argv) {
 
 int main(int argc, char**argv)
 {
-     start_server();
+    start_server();
     // start_timer();
     //pingpong_server(argc, argv);
     return 0;
