@@ -115,23 +115,23 @@ public:
         });
         streams_.emplace( addr.remote, std::move(stream) );
 
-        server_.stop();
+        // server_.stop();
     }
     
-    void on_read(addr_pair_t addr, socket_io_result_t res, read_ctx_t& r) {
+    void on_read(const addr_pair_t& addr, socket_io_result_t res, read_ctx_t& r) {
         if (res.err) {
-            std::cout << "read err:" << res.naviteerr << endl;
+            // std::cout << "read err:" << res.naviteerr << endl;
             auto it = streams_.find(addr.remote);
             if (it != streams_.end()) {
                 it->second.stop();
                 streams_.erase(it);
             }
-            loop_.stop();
+            // loop_.stop();
             return;
         }
         auto rd = r.buf.ready();
         std::string_view str(rd.data(), rd.size());
-        std::cout << "server read:" << str << std::endl;
+        // std::cout << "server read:" << str << std::endl;
         r.buf.consume(rd.size());
 
         auto it = streams_.find(addr.remote);
@@ -142,7 +142,7 @@ public:
         }
     }
 
-    void on_write(addr_pair_t addr, socket_io_result_t res, write_ctx_t& w) {
+    void on_write(const addr_pair_t& addr, socket_io_result_t res, write_ctx_t& w) {
 
     }
 private:
@@ -239,7 +239,7 @@ int main(int argc, char**argv)
 {
     start_server();
     // start_timer();
-    //pingpong_server(argc, argv);
+    // pingpong_server(argc, argv);
     return 0;
 }
 

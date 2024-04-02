@@ -105,13 +105,6 @@ namespace shu {
             if (std::exchange(stop_, true)) {
                 return;
             }
-
-            io_uring_push_sqe(loop_, [&](io_uring* ring){
-                auto* navie_sock = navite_cast_ssocket(sock_.get());
-                struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                io_uring_prep_cancel_fd(sqe, navie_sock->fd, 0);
-                io_uring_submit(ring);
-            });
             sock_->close();
         }
     };
