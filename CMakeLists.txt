@@ -28,7 +28,7 @@ set(shuio_files
     shuio/shu_socket.h
     shuio/shu_stream.h
     )
-
+set(lib_files shuio)
 if(WIN32)  
     list(APPEND shuio_files
         shuio/win32/win32_detail.h
@@ -51,6 +51,7 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
         shuio/linux/shu_socket.cpp
         shuio/linux/shu_stream.cpp
     )
+    list(APPEND lib_files uring)
 else()  
     error("Building for an unknown system")  
 endif()
@@ -61,7 +62,7 @@ add_library(shuio STATIC ${shuio_files})
 target_include_directories(shuio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_executable(sio example/sio.cpp)
-target_link_libraries(sio shuio uring)
+target_link_libraries(sio ${lib_files})
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
