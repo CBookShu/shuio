@@ -17,7 +17,7 @@ namespace shu {
 		}flags;
 	}ssocket_opt;
 
-	enum shutdown_type {
+	enum class shutdown_type {
 		shutdown_read,
 		shutdown_write,
 		shutdown_both,
@@ -46,7 +46,7 @@ namespace shu {
 		auto listen() -> bool;
 		void close();
 		bool valid();
-		void shutdown(shutdown_type how = shutdown_both);
+		void shutdown(shutdown_type how = shutdown_type::shutdown_both);
 	};
 };
 

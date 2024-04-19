@@ -5,6 +5,7 @@
 #include <shuio/shu_socket.h>
 
 #include <vector>
+#include <bitset>
 
 namespace shu {
     struct sstream::sstream_t : public std::enable_shared_from_this<sstream_t> {
@@ -14,16 +15,19 @@ namespace shu {
 
         std::unique_ptr<socket_buffer> read_buffer_;
         std::vector<socket_buffer> write_buffer_;
+        std::shared_ptr<sstream_t> holder_;
 
         io_uring_task_union read_complete_;
         sstream::func_read_t read_cb_;
-        std::shared_ptr<sstream_t> read_holder_;
 
         io_uring_task_union write_complete_;
         sstream::func_write_t write_cb_;
-        std::shared_ptr<sstream_t> write_holder_;
 
-        bool stop_;
+        enum StatusIdx{
+            I_Stop,I_Read,I_Write,
+            I_TOTAL,
+        };
+        std::bitset<I_TOTAL> status_flags_;
         
         sstream_t(sloop* loop, ssocket* sock, sstream_opt opt, sstream::func_read_t&& read_cb, sstream::func_write_t&& write_cb) {
             loop_ = loop;
@@ -34,7 +38,8 @@ namespace shu {
 
             read_cb_ = std::forward<sstream::func_read_t>(read_cb);
             write_cb_ = std::forward<sstream::func_write_t>(write_cb);
-            stop_ = false;
+
+            status_flags_.reset();
         }
 
         ~sstream_t() {
@@ -53,21 +58,42 @@ namespace shu {
             std::get_if<io_uring_socket_t>(&write_complete_)->cb = [this](io_uring_cqe* cqe){
                 run_write(cqe);
             };
-
+            holder_ = shared_from_this();
+            status_flags_.set(I_Read);
             post_read();
         }
 
-        void post_write(socket_buffer* buf) {
-            if(stop_) {
-                return;
-            }
-			if (buf && !buf->ready().empty()) {
-				write_buffer_.emplace_back(std::move(*buf));
-			}
+        bool check_stop_or_err_flags() {
+            // 只要stop或者 no read 说明状态已经不对劲了
+            return status_flags_.test(I_Stop) || !status_flags_.test(I_Read);
+        }
 
-            if(write_holder_) {
+        void update_sockflags() {
+            auto l = status_flags_.to_ullong();
+            if ((l|0x001) == 0x001) {
+                // 读写都已经关闭了
+                if (sock_ && sock_->valid()) {
+                    sock_->close();
+                }
+                return holder_.reset();        // 释放自己
+            }
+        }
+
+        void post_write(socket_buffer* buf) {
+            if (buf) {
+                if (status_flags_.test(I_Stop)) {
+                    // 准备停止了，别写了，省的一直有buff 停不下来
+                    return;
+                }
+                if (!buf->ready().empty()) {
+                    write_buffer_.emplace_back(std::move(*buf));
+                }
+            }
+
+            if (status_flags_.test(I_Write)) {
                 return;
             }
+            status_flags_.set(I_Write);
 
             io_uring_push_sqe(loop_, [this](io_uring* ring){
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
@@ -82,15 +108,9 @@ namespace shu {
                 io_uring_sqe_set_data(sqe, &write_complete_);
                 io_uring_submit(ring);
             });
-
-            write_holder_ = shared_from_this();
         }
 
         void post_read() {
-            if(stop_) {
-                return;
-            }
-            assert(!read_holder_);
             io_uring_push_sqe(loop_, [this](io_uring* ring){
                 struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
                 auto buf = read_buffer_->prepare(opt_.read_buffer_count_per_op);
@@ -100,13 +120,9 @@ namespace shu {
                 io_uring_sqe_set_data(sqe, &read_complete_);
                 io_uring_submit(ring);
             });
-
-            read_holder_ = shared_from_this();
         }
 
         void run_read(io_uring_cqe* cqe) {
-            auto tmp = std::move(read_holder_);
-
             read_ctx_t ctx{ .buf = *read_buffer_ };
             socket_io_result res;
             if(cqe->res < 0) {
@@ -120,6 +136,14 @@ namespace shu {
             read_cb_(res, ctx);
 
             if(res.err != 0) {
+                // 读失败 主动调用stop 试试吧
+                status_flags_.reset(I_Read);
+                if (status_flags_.test(I_Write)) {
+                    stop();
+                } else {
+                    // 读写都关闭，里面应该会销毁掉的
+                    update_sockflags();
+                }
                 return;
             }
 
@@ -127,7 +151,12 @@ namespace shu {
         }
 
         void run_write(io_uring_cqe* cqe) {
-            auto tmp = std::move(write_holder_);
+            S_DEFER([this](){
+                update_sockflags();
+            });
+
+            status_flags_.reset(I_Write);
+
             socket_io_result_t res;
             write_ctx_t ctx{ .bufs = write_buffer_ };
             if(cqe->res < 0) {
@@ -137,7 +166,7 @@ namespace shu {
             } else if(cqe->res == 0) {
                 res = socket_io_result_t{ .bytes = 0, .err = 0, .naviteerr = 0 };
             }
-            
+
             write_cb_(res, ctx);
 
             auto total = cqe->res;
@@ -152,25 +181,43 @@ namespace shu {
 			if (it != write_buffer_.begin()) {
 				write_buffer_.erase(write_buffer_.begin(), it);
 			}
+
+            if(res.err < 0) {
+                // 写入失败了 这里都写入失败了，还需要shutdown？
+                if (sock_ && sock_->valid()) {
+                    sock_->shutdown(shutdown_type::shutdown_write);
+                }
+                return;
+            }
+
 			if (!write_buffer_.empty()) {
 				post_write(nullptr);
-			}
+			} else {
+                // 写完了
+                if (status_flags_.test(I_Stop)) {
+                    // 关闭写准备挥手
+                    if (sock_ && sock_->valid()) {
+                        sock_->shutdown(shutdown_type::shutdown_write);
+                    }
+                }
+                return;
+            }
         }
 
         void stop() {
-            if(std::exchange(stop_, true)) {
+            if (status_flags_.test(I_Stop)) {
                 return;
             }
-            sock_->close();
-            // io_uring_push_sqe(loop_, [&](io_uring* ring){
-            //     auto* navie_sock = navite_cast_ssocket(sock_.get());
-            //     struct io_uring_sqe *read_sqe = io_uring_get_sqe(ring);
-            //     io_uring_prep_cancel(read_sqe, &read_complete_, 0);
-
-            //     struct io_uring_sqe *write_sqe = io_uring_get_sqe(ring);
-            //     io_uring_prep_cancel(write_sqe, &write_complete_, 0);
-            //     io_uring_submit(ring);
-            // });
+            status_flags_.set(I_Stop);
+            // 当正在写，或还有写buffer，应该把当前的消息发送完毕后，再shutdown write
+            // 最后对面读到fin 然后自己再close 优雅的关闭
+            if(status_flags_.test(I_Write)) {
+                return;
+            }
+            // 直接关闭写，通知对方
+            sock_->shutdown(shutdown_type::shutdown_write);
+            status_flags_.reset(I_Write);
+            update_sockflags();
         }
     };
 

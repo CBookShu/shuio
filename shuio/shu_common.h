@@ -28,7 +28,7 @@ namespace shu {
 		return s_defer<T>(std::forward<T&&>(cb));
 	}
 
-#define S_DEFER(exp)	s_defer_make([&](){exp});
+#define S_DEFER(exp)	s_defer_make([&](){exp;});
 
 	typedef struct addr_storage_t {
 		bool udp;//0 tcp,1 udp

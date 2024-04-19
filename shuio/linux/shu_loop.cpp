@@ -78,7 +78,6 @@ namespace shu {
 		}
 		auto timer_add(steady_clock::time_point now, sloop_timer_t_id id, func_t&& cb) -> void {
 			using namespace std::chrono;
-            auto expire = timer_min_expire(id.expire);
             timers.push_back(timer_node{
                 .id = id, .cb = std::forward<func_t>(cb)
                 });

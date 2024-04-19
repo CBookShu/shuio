@@ -41,7 +41,6 @@ namespace shu {
 			if (opt_.flags.noblock == flag) {
 				return true;
 			}
-			u_long i = flag;
 			int status = ::fcntl(fd, F_GETFL);
 			
 			if(flag) {
@@ -141,9 +140,9 @@ namespace shu {
 
 		void shutdown(shutdown_type how) {
 			int t = SHUT_RD;
-			if (how == shutdown_write)
+			if (how == shutdown_type::shutdown_write)
 				t = SHUT_WR;
-			else if(how == shutdown_both){
+			else if(how == shutdown_type::shutdown_both){
 				t = SHUT_RDWR;
 			}
 			::shutdown(fd, t);
