@@ -72,7 +72,7 @@ namespace shu {
             io_uring_push_sqe(loop_, [this](io_uring* ring){
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
                 std::vector<struct iovec> bufs(write_buffer_.size());
-                for(int i = 0; i < bufs.size(); ++i) {
+                for(std::size_t i = 0; i < bufs.size(); ++i) {
                     auto b = write_buffer_[i].ready();
                     bufs[i].iov_base = b.data();
                     bufs[i].iov_len = b.size();
@@ -112,10 +112,10 @@ namespace shu {
             if(cqe->res < 0) {
                 res = {.bytes = 0, .err = -1, .naviteerr = cqe->res};
             } else if(cqe->res > 0) {
-                res = {.bytes = cqe->res, .err = 0, .naviteerr = 0};
+                res = {.bytes = static_cast<std::uint32_t>(cqe->res), .err = 0, .naviteerr = 0};
                 read_buffer_->commit(cqe->res);
             } else if(cqe->res == 0) {
-                res = {.bytes = cqe->res, .err = -1, .naviteerr = 0};
+                res = {.bytes = 0, .err = -1, .naviteerr = 0};
             }
             read_cb_(res, ctx);
 
@@ -133,7 +133,7 @@ namespace shu {
             if(cqe->res < 0) {
                 res = socket_io_result_t{ .bytes = 0,.err = -1, .naviteerr = cqe->res };
             } else if(cqe->res > 0) {
-                res = socket_io_result_t{ .bytes = cqe->res, .err = 0, .naviteerr = 0 };
+                res = socket_io_result_t{ .bytes = static_cast<std::uint32_t>(cqe->res), .err = 0, .naviteerr = 0 };
             } else if(cqe->res == 0) {
                 res = socket_io_result_t{ .bytes = 0, .err = 0, .naviteerr = 0 };
             }
