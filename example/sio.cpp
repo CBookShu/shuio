@@ -139,14 +139,8 @@ public:
             socket_buffer buf(str);
             buf.commit();
             it->second.write(std::move(buf));
+            it->second.stop();
         }
-
-        loop_.add_timer([this, addr](){
-            auto it = streams_.find(addr.remote);
-            if (it != streams_.end()) {
-                it->second.stop();
-            }
-        }, 3s);
     }
 
     void on_write(const addr_pair_t& addr, socket_io_result_t res, write_ctx_t& w) {
