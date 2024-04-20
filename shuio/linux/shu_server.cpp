@@ -39,9 +39,13 @@ namespace shu {
 
 			if (!addr_.udp) {
 				if (!sock_->bind(addr_)) {
+                    socket_io_result_t res{ .err = -1, .naviteerr = s_last_error()};
+                    creator_(res, nullptr, {});
 					return;
 				}
 				if (!sock_->listen()) {
+                    socket_io_result_t res{ .err = -1, .naviteerr = s_last_error()};
+                    creator_(res, nullptr, {});
 					return;
 				}
 			}

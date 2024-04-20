@@ -23,11 +23,9 @@ namespace shu {
         io_uring_task_union write_complete_;
         sstream::func_write_t write_cb_;
 
-        enum StatusIdx{
-            I_Stop,I_Read,I_Write,
-            I_TOTAL,
-        };
-        std::bitset<I_TOTAL> status_flags_;
+        bool stop_;
+        bool reading_;
+        bool writing_;
         
         sstream_t(sloop* loop, ssocket* sock, sstream_opt opt, sstream::func_read_t&& read_cb, sstream::func_write_t&& write_cb) {
             loop_ = loop;
@@ -39,14 +37,13 @@ namespace shu {
             read_cb_ = std::forward<sstream::func_read_t>(read_cb);
             write_cb_ = std::forward<sstream::func_write_t>(write_cb);
 
-            status_flags_.reset();
+            stop_ = false;
+            reading_ = false;
+            writing_ = false;
         }
 
         ~sstream_t() {
-            if (sock_ && sock_->valid()) {
-                sock_->shutdown();
-                sock_->close();
-            }
+
         }
 
         void start() {
@@ -59,30 +56,20 @@ namespace shu {
                 run_write(cqe);
             };
             holder_ = shared_from_this();
-            status_flags_.set(I_Read);
             post_read();
         }
 
-        bool check_stop_or_err_flags() {
-            // 只要stop或者 no read 说明状态已经不对劲了
-            return status_flags_.test(I_Stop) || !status_flags_.test(I_Read);
-        }
-
-        void update_sockflags() {
-            auto l = status_flags_.to_ullong();
-            if ((l|0x001) == 0x001) {
-                // 读写都已经关闭了
-                if (sock_ && sock_->valid()) {
-                    sock_->close();
-                }
-                return holder_.reset();        // 释放自己
+        void check_close_and_destroy() {
+            if (!reading_ && !writing_) {
+                holder_.reset();
             }
         }
 
         void post_write(socket_buffer* buf) {
             if (buf) {
-                if (status_flags_.test(I_Stop)) {
+                if (stop_) {
                     // 准备停止了，别写了，省的一直有buff 停不下来
+                    // panic?
                     return;
                 }
                 if (!buf->ready().empty()) {
@@ -90,11 +77,10 @@ namespace shu {
                 }
             }
 
-            if (status_flags_.test(I_Write)) {
+            if (std::exchange(writing_, true)) {
                 return;
             }
-            status_flags_.set(I_Write);
-
+            
             io_uring_push_sqe(loop_, [this](io_uring* ring){
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
                 std::vector<struct iovec> bufs(write_buffer_.size());
@@ -111,6 +97,7 @@ namespace shu {
         }
 
         void post_read() {
+            reading_ = true;
             io_uring_push_sqe(loop_, [this](io_uring* ring){
                 struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
                 auto buf = read_buffer_->prepare(opt_.read_buffer_count_per_op);
@@ -123,6 +110,10 @@ namespace shu {
         }
 
         void run_read(io_uring_cqe* cqe) {
+            reading_ = false;
+            auto _finaly = s_defer([this, self = holder_](){
+                check_close_and_destroy();
+            });
             read_ctx_t ctx{ .buf = *read_buffer_ };
             socket_io_result res;
             if(cqe->res < 0) {
@@ -136,13 +127,9 @@ namespace shu {
             read_cb_(res, ctx);
 
             if(res.err != 0) {
-                // 读失败 主动调用stop 试试吧
-                status_flags_.reset(I_Read);
-                if (status_flags_.test(I_Write)) {
+                // 读失败 主动停止
+                if (writing_) {
                     stop();
-                } else {
-                    // 读写都关闭，里面应该会销毁掉的
-                    update_sockflags();
                 }
                 return;
             }
@@ -151,11 +138,10 @@ namespace shu {
         }
 
         void run_write(io_uring_cqe* cqe) {
-            S_DEFER([this](){
-                update_sockflags();
+            writing_ = false;
+            auto _finaly = s_defer([this, self = holder_](){
+                check_close_and_destroy();
             });
-
-            status_flags_.reset(I_Write);
 
             socket_io_result_t res;
             write_ctx_t ctx{ .bufs = write_buffer_ };
@@ -192,32 +178,29 @@ namespace shu {
 
 			if (!write_buffer_.empty()) {
 				post_write(nullptr);
-			} else {
-                // 写完了
-                if (status_flags_.test(I_Stop)) {
-                    // 关闭写准备挥手
-                    if (sock_ && sock_->valid()) {
-                        sock_->shutdown(shutdown_type::shutdown_write);
-                    }
-                }
-                return;
+			}
+
+            if (!writing_ && stop_) {
+                // 要关闭了
+                sock_->shutdown(shutdown_type::shutdown_write);
             }
         }
 
         void stop() {
-            if (status_flags_.test(I_Stop)) {
+            if (std::exchange(stop_, true)) {
                 return;
             }
-            status_flags_.set(I_Stop);
-            // 当正在写，或还有写buffer，应该把当前的消息发送完毕后，再shutdown write
-            // 最后对面读到fin 然后自己再close 优雅的关闭
-            if(status_flags_.test(I_Write)) {
+
+            // 等所有正在write的Buffer 发过去，以防整个包发一半
+            if (writing_) {
                 return;
             }
+            auto _finally = s_defer([this, self = holder_](){
+                check_close_and_destroy();
+            });
             // 直接关闭写，通知对方
             sock_->shutdown(shutdown_type::shutdown_write);
-            status_flags_.reset(I_Write);
-            update_sockflags();
+            writing_ = false;
         }
     };
 

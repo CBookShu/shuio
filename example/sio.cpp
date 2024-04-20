@@ -101,7 +101,7 @@ public:
         std::unique_ptr<ssocket> sock,
         addr_pair_t addr) {
         if (res.err) {
-            std::cout << "tcp server err:" << res.naviteerr << std::endl;
+            std::cout << "tcp server err:" << res.naviteerr << "," << strerror(res.naviteerr) << std::endl;
             return;
         }
 
@@ -140,6 +140,13 @@ public:
             buf.commit();
             it->second.write(std::move(buf));
         }
+
+        loop_.add_timer([this, addr](){
+            auto it = streams_.find(addr.remote);
+            if (it != streams_.end()) {
+                it->second.stop();
+            }
+        }, 3s);
     }
 
     void on_write(const addr_pair_t& addr, socket_io_result_t res, write_ctx_t& w) {
@@ -229,6 +236,7 @@ static void pingpong_server(int argc, char** argv) {
     int port = 0;
     const char* sport = "9595";
     auto r = std::from_chars(sport, sport + strlen(sport), port);
+    (void)r;
     addr_storage_t addr_server{ .udp = false, .port = port};
     svr.start(&l, acceptr_cb, addr_server);
 
