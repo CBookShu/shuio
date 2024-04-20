@@ -28,10 +28,11 @@ namespace shu {
 		sstream::func_read_t rd_cb_;
 		sstream::func_write_t wt_cb_;
 
-		std::shared_ptr<sstream_t> read_hold_;
-		std::shared_ptr<sstream_t> write_hold_;
+		std::shared_ptr<sstream_t> holder_;
 
-		bool stopping;
+		bool stop_;
+		bool reading_;
+		bool writting_;
 
 		sstream_t(sloop* loop, 
 			ssocket* sock, 
@@ -50,7 +51,9 @@ namespace shu {
 			rd_cb_ = std::forward<sstream::func_read_t>(rd_cb);
 			wt_cb_ = std::forward<sstream::func_write_t>(wt_cb);
 
-			stopping = false;
+			stop_ = false;
+			reading_ = false;
+			writting_ = false;
 		}
 		void start() {
 			navite_attach_iocp(loop_, sock_.get());
@@ -68,17 +71,27 @@ namespace shu {
 				run_write(entry);
 			};
 
+			holder_ = shared_from_this();
+
+			auto _finally_ = s_defer([&, self = holder_](){
+				check_close_and_destroy();
+			});
+
 			post_read();
 		}
+
+		void check_close_and_destroy() {
+            if (!reading_ && !writting_) {
+                holder_.reset();
+            }
+        }
+
 		void post_read() {
-			if (stopping) {
-				return;
-			}
-			assert(!read_hold_);
+			reading_ = true;
 
 			auto* navite_sock = navite_cast_ssocket(sock_.get());
 			auto s = read_buffer_->prepare(opt_.read_buffer_count_per_op);
-			WSABUF buf = { s.size_bytes(), s.data() };
+			WSABUF buf = {.len = static_cast<ULONG>(s.size()), .buf = s.data()};
 			DWORD dwFlags = 0;
 			DWORD dwBytes = 0;
 
@@ -86,6 +99,8 @@ namespace shu {
 			if (r == SOCKET_ERROR) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
+					reading_ = false;
+
 					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
 					read_ctx_t ctx{ .buf = *read_buffer_};
 					rd_cb_(res, ctx);
@@ -93,20 +108,23 @@ namespace shu {
 				}
 			}
 
-			read_hold_ = shared_from_this();
 		}
 		void post_write(socket_buffer* buf = nullptr) {
-			if (stopping) {
+			if (stop_) {
 				// 调用了stop后，不再接受write
 				return;
 			}
 
-			if (buf && !buf->ready().empty()) {
-				write_buffer_.emplace_back(std::move(*buf));
+			if (buf) {
+				if (stop_) {
+					return;
+				}
+				if (!buf->ready().empty()) {
+					write_buffer_.emplace_back(std::move(*buf));
+				}
 			}
-			
-			if (write_hold_) {
-				// writing
+
+			if (std::exchange(writting_, true)) {
 				return;
 			}
 
@@ -116,28 +134,30 @@ namespace shu {
 				auto data = it.ready();
 				WSABUF buf;
 				buf.buf = data.data();
-				buf.len = data.size_bytes();
+				buf.len = static_cast<ULONG>(data.size());
 				buffs.emplace_back(buf);
 			}
 			DWORD dwFlags = 0;
 			DWORD dwBytes = 0;
-			auto r = ::WSASend(navite_sock->s, buffs.data(), buffs.size(), &dwBytes, dwFlags, &writer_, nullptr);
+			auto r = ::WSASend(navite_sock->s, buffs.data(), static_cast<DWORD>(buffs.size()), &dwBytes, dwFlags, &writer_, nullptr);
 			if (r == SOCKET_ERROR) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
+					writting_ = false;
+
 					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
 					write_ctx_t ctx{ .bufs = write_buffer_, };
 					wt_cb_(res, ctx);
 					return;
 				}
 			}
-
-			write_hold_ = shared_from_this();
 		}
 
 		void run_read(OVERLAPPED_ENTRY* entry) {
-			auto self = shared_from_this();
-			read_hold_.reset();
+			reading_ = false;
+			auto _finally_ = s_defer([&, self = holder_](){
+				check_close_and_destroy();
+			});
 
 			socket_io_result_t res{ 
 				.bytes = entry->dwNumberOfBytesTransferred,
@@ -147,30 +167,36 @@ namespace shu {
 			if (entry->dwNumberOfBytesTransferred == 0) {
 				// fin
 				res.err = -1;
-				rd_cb_(res, ctx);
-				return;
 			}
 			
 			// 回调
 			read_buffer_->commit(entry->dwNumberOfBytesTransferred);
 			rd_cb_(res, ctx);
 
+			if (res.err < 0) {
+				if (writting_) {
+					stop();
+				}
+				return;
+			}
 			// 继续读
 			post_read();
 		}
 		void run_write(OVERLAPPED_ENTRY* entry) {
-			auto self = shared_from_this();
-			write_hold_.reset();
+			writting_ = false;
+			auto _finally_ = s_defer([&, self = holder_](){
+				check_close_and_destroy();
+			});
 
 			socket_io_result_t res{
 				.bytes = entry->dwNumberOfBytesTransferred,
 				.err = 0,
 				.naviteerr = s_last_error() };
 			write_ctx_t ctx{ .bufs = write_buffer_ };
-			if (entry->dwNumberOfBytesTransferred == 0) {
+			if (entry->dwNumberOfBytesTransferred > 0) {
+
+			} else if (entry->dwNumberOfBytesTransferred == 0) {
 				res.err = -1;
-				wt_cb_(res, ctx);
-				return;
 			}
 
 			wt_cb_(res, ctx);
@@ -178,7 +204,7 @@ namespace shu {
 			auto total = entry->dwNumberOfBytesTransferred;
 			auto it = write_buffer_.begin();
 			for (; it != write_buffer_.end(); ++it) {
-				total -= it->consume(total);
+				total -= static_cast<DWORD>(it->consume(total));
 				auto ready = it->ready();
 				if (ready.size() > 0) {
 					break;
@@ -188,26 +214,42 @@ namespace shu {
 				write_buffer_.erase(write_buffer_.begin(), it);
 			}
 
+			if (res.err < 0) {
+				// 写失败
+				if (sock_ && sock_->valid()) {
+					sock_->shutdown(shutdown_type::shutdown_write);
+				}
+				return;
+			}
+
 			if (!write_buffer_.empty()) {
 				post_write();
+			}
+
+			if (!writting_ && stop_) {
+				if (sock_ && sock_->valid()) {
+					sock_->shutdown(shutdown_type::shutdown_write);
+					auto* navite_sock = navite_cast_ssocket(sock_.get());
+					::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
+				}
 			}
 		}
 
 		void stop() {
-			if (std::exchange(stopping, true)) {
+			if (std::exchange(stop_, true)) {
 				return;
 			}
 
-			/*
-			这里仅仅通过CancelIoEx的方式，最终析构，closesocket，可以最大化
-			接收iocp中已完成的内容；
-			如果在这里直接立刻执行closesocket，那么会立即终止后续的读写
-			*/ 
-			
+			if (writting_) {
+				return;
+			}
+
+			auto _finally_ = s_defer([&, self = holder_](){
+				check_close_and_destroy();
+			});
 			auto* navite_sock = navite_cast_ssocket(sock_.get());
+			sock_->shutdown(shutdown_type::shutdown_write);
 			::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
-			::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &writer_);
-			sock_->close();
 		}
 	};
 	

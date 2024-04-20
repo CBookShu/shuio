@@ -105,9 +105,9 @@ namespace shu {
 
 		void shutdown(shutdown_type how) {
 			int t = SD_RECEIVE;
-			if (how == shutdown_write)
+			if (how == shutdown_type::shutdown_write)
 				t = SD_SEND;
-			else if(how == shutdown_both){
+			else if(how == shutdown_type::shutdown_both){
 				t = SD_BOTH;
 			}
 			::shutdown(s, t);

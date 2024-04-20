@@ -40,6 +40,7 @@ if(WIN32)
         shuio/win32/shu_socket.cpp
         shuio/win32/shu_stream.cpp
     )
+    add_compile_options(/wd4819)
 elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")  
     list(APPEND shuio_files
         shuio/linux/linux_detail.h
