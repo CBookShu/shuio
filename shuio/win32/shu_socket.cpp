@@ -17,7 +17,7 @@ namespace shu {
 		}
 
 		void init(bool udp, bool v6) {
-			shu::exception_check(s == INVALID_SOCKET);
+			shu::panic(s == INVALID_SOCKET);
 			int type = SOCK_STREAM;
 			int protocol = IPPROTO_TCP;
 			if (udp) {
@@ -29,7 +29,7 @@ namespace shu {
 				family = AF_INET6;
 			}
 			s = ::WSASocket(AF_INET, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
-			shu::exception_check(s != INVALID_SOCKET);
+			shu::panic(s != INVALID_SOCKET);
 
 			bool non_ifs_lsp;
 			if (family == AF_INET6) {
@@ -41,7 +41,7 @@ namespace shu {
 				UCHAR sfcnm_flags =
 					FILE_SKIP_SET_EVENT_ON_HANDLE | FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
 				if (!SetFileCompletionNotificationModes((HANDLE) s, sfcnm_flags)) {
-					shu::exception_check(false, "HANDLE_SYNC_BYPASS_IOCP");
+					shu::panic(false, "HANDLE_SYNC_BYPASS_IOCP");
 				}
 			}
 		}

@@ -50,7 +50,7 @@ namespace shu {
 
 	// exception check
 	// TODO: C++23 add stacktrace
-	void exception_check(
+	void panic(
 		bool con,
 		std::string_view msg = {},
 		std::source_location call = std::source_location::current()
@@ -61,4 +61,26 @@ namespace shu {
 	// void* -> struct sockaddr_in
 	void sockaddr_2_storage(void*, addr_storage_t*);
 	bool storage_2_sockaddr(addr_storage_t*, void*);
+
+	// common user data begin
+	template <typename T>
+	concept c_has_any_userdata = requires (T t) {
+		{t.get_ud()}->std::same_as<std::any*>;
+	};
+
+	template <typename T, typename O>
+	requires c_has_any_userdata<O>
+	decltype(auto) get_user_data(O&& o) {
+		std::any* a = std::forward<O>(o).get_ud();
+		return std::any_cast<T>(a);
+	}
+
+	template <typename T, typename O, typename...Args>
+	requires c_has_any_userdata<O>
+	decltype(auto) set_user_data(O&& o, Args&&...args) {
+		std::any* a = std::forward<O>(o).get_ud();
+		*a = std::make_any<T>(std::forward<Args>(args)...);
+		return std::any_cast<T>(a);
+	}
+	// common user end
 };

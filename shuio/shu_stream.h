@@ -39,18 +39,7 @@ namespace shu {
 			sloop*, ssocket*, sstream_opt opt, 
 			stream_ctx_t&& stream_event);
 
-		auto set_ud(std::any a) -> std::any*;
 		auto get_ud() -> std::any*;
-		template<typename T>
-		decltype(auto) get_ud_t() {
-			auto* a = get_ud();
-			return std::any_cast<T>(a);
-		}
-		template<typename T, typename... Args>
-		decltype(auto) set_ud_t(Args&&...args) {
-			auto* a = set_ud(std::make_any<T>(std::forward<Args>(args)...));
-			return std::any_cast<T>(a);
-		}
 
 		// TODO: 支持read和write 重复多次调用
 		bool read(buffer_t buf, func_read_t&& cb);

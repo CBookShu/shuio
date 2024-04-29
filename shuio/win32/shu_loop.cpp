@@ -160,7 +160,7 @@ namespace shu {
 
         sloop_t() {
             iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
-            shu::exception_check(iocp != INVALID_HANDLE_VALUE,
+            shu::panic(iocp != INVALID_HANDLE_VALUE,
                 std::format("Bad Create Error:{}", WSAGetLastError()));
 
             run_tid_ = std::this_thread::get_id();
@@ -178,11 +178,11 @@ namespace shu {
         void run() {
             if (iocp == INVALID_HANDLE_VALUE) {
                 iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
-                shu::exception_check(iocp != INVALID_HANDLE_VALUE,
+                shu::panic(iocp != INVALID_HANDLE_VALUE,
                     std::format("Bad Create Error:{}", WSAGetLastError()));
             }
 
-            shu::exception_check(std::this_thread::get_id() == run_tid_,
+            shu::panic(std::this_thread::get_id() == run_tid_,
                 std::format("run tid != loop create tid"));
 
             on_start();
@@ -254,7 +254,7 @@ namespace shu {
         }
 
         void post(func_t&& cb) {
-            shu::exception_check(iocp != INVALID_HANDLE_VALUE);
+            shu::panic(iocp != INVALID_HANDLE_VALUE);
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 tasks_.emplace_back(std::forward<func_t>(cb));
@@ -341,7 +341,7 @@ namespace shu {
         }
 
         void check_thread(std::source_location call) {
-            shu::exception_check(std::this_thread::get_id() == run_tid_, "", call);
+            shu::panic(std::this_thread::get_id() == run_tid_, "", call);
         }
     };
 
@@ -363,7 +363,7 @@ namespace shu {
 
     auto sloop::handle() -> sloop_t*
     {
-        shu::exception_check(loop_ != nullptr);
+        shu::panic(loop_ != nullptr);
         return loop_;
     }
 

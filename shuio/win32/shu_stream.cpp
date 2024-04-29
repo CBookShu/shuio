@@ -44,9 +44,17 @@ namespace shu {
 			stream_ctx_(std::forward<sstream::stream_ctx_t>(stream_event)) ,
 			stop_(false)
 		{
-			shu::exception_check(!!stream_ctx_.evClose);
+			
 		}
 		~sstream_t() {
+		}
+
+		void post_to_close() {
+			if (stream_ctx_.evClose) {
+				loop_->post([cb = std::move(stream_ctx_.evClose), owner = owner_](){
+					cb(owner);
+				});
+			}
 		}
 
 		void start() {
@@ -128,7 +136,7 @@ namespace shu {
 				read_cb(res);
 			}
 		}
-		
+
 		void static run_write(sstream::sstream_t* self, OVERLAPPED_ENTRY* entry) {
 			socket_io_result_t res{.res = static_cast<int>(entry->dwNumberOfBytesTransferred)};
 			if (res.res == 0) {
@@ -142,9 +150,7 @@ namespace shu {
 			}
 
 			if(self->stop_) {
-				self->loop_->post([cb = std::move(self->stream_ctx_.evClose), owner = self->owner_](){
-					cb(owner);
-				});
+				self->post_to_close();
 			}
 		}
 
@@ -162,9 +168,7 @@ namespace shu {
 			if (read_cb_) {
 				::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
 			} else {
-				loop_->post([cb = std::move(stream_ctx_.evClose), owner = owner_](){
-					cb(owner);
-				});
+				post_to_close();
 			}
 		}
 	};
@@ -187,19 +191,19 @@ namespace shu {
 	}
 
 	auto sstream::option() -> sstream_opt {
-		shu::exception_check(s_);
+		shu::panic(s_);
 		return s_->opt_;
 	}
 
 	auto sstream::loop() -> sloop* {
-		shu::exception_check(s_);
+		shu::panic(s_);
 		return s_->loop_;
 	}
 
 	void sstream::start(sloop* l, ssocket* s, sstream_opt opt,
 		stream_ctx_t&& stream_event)
 	{
-		exception_check(!s_);
+		panic(!s_);
 		l->assert_thread();
 
 		auto ptr = std::make_unique<sstream_t>(l, this, s, opt, std::forward<stream_ctx_t>(stream_event));
@@ -207,40 +211,36 @@ namespace shu {
 		s_ = ptr.release();
 	}
 
-	auto sstream::set_ud(std::any a) -> std::any* {
-		s_->ud_.swap(a);
-		return &s_->ud_;
-	}
 	auto sstream::get_ud() -> std::any* {
 		return &s_->ud_;
 	}
 
 	bool sstream::read(buffer_t buf, func_read_t&& cb) {
-		exception_check(s_);
+		panic(s_);
 		buffer_t bufs[1] = {buf};
 		return s_->post_read(bufs, std::forward<func_read_t>(cb));
 	}
 
 	bool sstream::read(std::span<buffer_t> bufs, func_read_t&& cb) {
-		exception_check(s_);
+		panic(s_);
 		return s_->post_read(bufs, std::forward<func_read_t>(cb));
 	}
 
 	bool sstream::write(buffer_t buf, func_write_t&& cb)
 	{
-		exception_check(s_);
+		panic(s_);
 		buffer_t bufs[1] = {buf};
 		return s_->post_write(bufs, std::forward<func_write_t>(cb));
 	}
 
 	bool sstream::write(std::span<buffer_t> bufs, func_write_t&& cb) {
-		exception_check(s_);
+		panic(s_);
 		return s_->post_write(bufs, std::forward<func_write_t>(cb));
 	}
 
 	void sstream::stop()
 	{
-		exception_check(s_);
+		panic(s_);
 		s_->stop();
 	}
 

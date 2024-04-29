@@ -35,7 +35,7 @@ namespace shu {
 		: loop_(loop), owner_(owner), addr_(addr),
 		server_ctx_(std::forward<event_ctx>(server_ctx)), stop_(false)
 		{
-			shu::exception_check(!!server_ctx_.evConn);
+			shu::panic(!!server_ctx_.evConn);
 		}
 		~sserver_t() {
 			
@@ -78,7 +78,7 @@ namespace shu {
 					continue;
 				}
 
-				shu::exception_check(sizeof(sock_addr_) >=  p->ai_addrlen);
+				shu::panic(sizeof(sock_addr_) >=  p->ai_addrlen);
 				std::memcpy(&sock_addr_, p->ai_addr, p->ai_addrlen);
 				sock_.swap(ptr_sock);
                 break;
@@ -217,7 +217,7 @@ namespace shu {
 
 	bool sserver::start(sloop* loop, event_ctx&& ctx,addr_storage_t addr)
 	{
-		shu::exception_check(!s_);
+		shu::panic(!s_);
 		auto ptr = std::make_unique<sserver_t>(loop, this, std::forward<event_ctx>(ctx), addr);
 		auto r = ptr->start();
 		s_ = ptr.release();
@@ -225,13 +225,13 @@ namespace shu {
 	}
 
 	auto sserver::loop() -> sloop* {
-		shu::exception_check(s_);
+		shu::panic(s_);
 		return s_->loop_;
 	}
 
 	void sserver::stop()
 	{
-		shu::exception_check(s_);
+		shu::panic(s_);
 		s_->stop();
 	}
 

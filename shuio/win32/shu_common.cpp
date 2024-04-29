@@ -5,7 +5,7 @@
 #include <format>
 
 namespace shu {
-	void exception_check(bool con, std::string_view msg, std::source_location call) noexcept
+	void panic(bool con, std::string_view msg, std::source_location call) noexcept
 	{
 		if (!con) [[unlikely]] {
 			auto path = std::filesystem::path(call.file_name());

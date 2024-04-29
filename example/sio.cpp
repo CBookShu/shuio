@@ -101,7 +101,7 @@ public:
                 addr_pair_t addr) {
             on_client(res, sock, addr);}
         }, addr);
-        shu::exception_check(ok);
+        shu::panic(ok);
     }
 
     ~tcp_server() {
@@ -126,7 +126,7 @@ public:
                 delete s;
             },
         });
-        auto* rwbuf = stream_ptr->set_ud_t<stream_with_buf>();
+        auto* rwbuf = shu::set_user_data<stream_with_buf>(*stream_ptr);
         rwbuf->rd_buf.emplace(&pool_);
         rwbuf->wt_buf.emplace(&pool_);
         rwbuf->rd_buf.value().resize(4096);
@@ -147,7 +147,7 @@ public:
             return;
         }
 
-        auto* rwbuf = s->get_ud_t<stream_with_buf>();
+        auto* rwbuf = shu::get_user_data<stream_with_buf>(*s);
         rwbuf->wt_buf.value().assign(buf.p, buf.p + res.res);
         buffer_t wbuf;
         wbuf.p = rwbuf->wt_buf.value().data();

@@ -24,7 +24,15 @@ namespace shu {
         remote_addr_(addr),stopping_(false)
         {
             connector_ = {};
-            shu::exception_check(!!cb_ctx_.evConn);
+            shu::panic(!!cb_ctx_.evConn);
+        }
+
+        void post_to_close() {
+            if (cb_ctx_.evClose) {
+                loop_->post([f = std::move(cb_ctx_.evClose), owner = owner_](){
+                    f(owner);
+                });
+            }
         }
 
         bool start() {
@@ -63,7 +71,7 @@ namespace shu {
                     continue;
                 }
 
-                shu::exception_check(len >= p->ai_addrlen);
+                shu::panic(len >= p->ai_addrlen);
                 std::memcpy(&addr, p->ai_addr, p->ai_addrlen);
                 sock_.swap(ptr_sock);
                 break;
@@ -108,9 +116,7 @@ namespace shu {
             }
 
             if(stopping_) {
-                loop_->post([f = std::move(cb_ctx_.evClose), owner = owner_](){
-                    f(owner);
-                });
+                post_to_close();
             }
         }
     
@@ -125,9 +131,7 @@ namespace shu {
                 ::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &connector_);
             } else {
                 // 要么是start 报错，要么是已经完成了
-                loop_->post([f = std::move(cb_ctx_.evClose), owner = owner_](){
-                    f(owner);
-                });
+                post_to_close();
             }
         }
     };
@@ -146,7 +150,7 @@ namespace shu {
     }
     bool sclient::start(sloop* loop, addr_storage_t saddr, sclient_ctx&& ctx)
     {
-        shu::exception_check(!s_);
+        shu::panic(!s_);
 
         auto sptr = std::make_unique<sclient_t>(loop, this, std::forward<sclient_ctx>(ctx), saddr);
         s_ = sptr.release();
@@ -154,13 +158,13 @@ namespace shu {
     }
 
     auto sclient::loop() -> sloop* {
-        shu::exception_check(s_);
+        shu::panic(s_);
         return s_->loop_;
     }
 
     void sclient::stop()
     {
-        shu::exception_check(s_);
+        shu::panic(s_);
         s_->stop();
     }
 };
