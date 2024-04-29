@@ -187,13 +187,13 @@ namespace shu {
 
             on_start();
 
-            OVERLAPPED_ENTRY overlappeds[128];
+            std::vector<OVERLAPPED_ENTRY> overlappeds(1024);
             ULONG count;
             for (;;) {
                 BOOL r = ::GetQueuedCompletionStatusEx(
                     iocp,
-                    overlappeds,
-                    _countof(overlappeds),
+                    overlappeds.data(),
+                    overlappeds.size(),
                     &count,
                     INFINITE,
                     false);
@@ -242,6 +242,9 @@ namespace shu {
 
                     on_stop();
                     break;
+                }
+                if (count == overlappeds.size()) {
+                    overlappeds.resize(count * 2);
                 }
             }
         }

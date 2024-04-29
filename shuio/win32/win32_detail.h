@@ -2,6 +2,7 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #include <MSWSock.h>
+#include <ws2def.h>
 #pragma comment(lib, "ws2_32.lib")
 
 #include <variant>
@@ -38,8 +39,11 @@ namespace shu {
 		static AcceptExPtr AcceptEx;
 		static ConnectExPtr ConnectEx;
 		static GetAcceptExSockaddrsPtr GetAcceptExSockaddrs;
-	};
 
+		// from libuv check lsp
+		static int tcp_non_ifs_lsp_ipv4;
+		static int tcp_non_ifs_lsp_ipv6;
+	};
 
 	class sloop;
 	auto navite_cast_loop(sloop*) -> iocp_navite_t*;

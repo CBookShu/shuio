@@ -5,233 +5,146 @@
 #include "shuio/shu_buffer.h"
 #include <vector>
 #include <atomic>
+#include <deque>
+
 
 namespace shu {
-	struct OpWithCb : OVERLAPPED {
-		std::function<void(OVERLAPPED_ENTRY*)> cb;
+	struct sstream::sstream_t {
+		using iocp_complete_func_t = void(*)(sstream::sstream_t*, OVERLAPPED_ENTRY*);
 
-		OpWithCb() {
-			std::memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
-		}
-	};
+		struct iocp_complete_ctx : OVERLAPPED {
+			iocp_complete_func_t cb;
 
-	struct sstream::sstream_t : public std::enable_shared_from_this<sstream_t> {
+			iocp_complete_ctx() {
+				std::memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
+			}
+		};
+
 		sloop* loop_;
+		sstream* owner_;
 		std::unique_ptr<ssocket> sock_;
 		sstream_opt opt_;
-		OpWithCb reader_;
-		OpWithCb writer_;
+		iocp_complete_ctx reader_;
+		iocp_complete_ctx writer_;
 
-		std::unique_ptr<socket_buffer> read_buffer_;
-		std::vector<socket_buffer> write_buffer_;
-
-		sstream::func_read_t rd_cb_;
-		sstream::func_write_t wt_cb_;
-
-		std::shared_ptr<sstream_t> holder_;
+		sstream::stream_ctx_t stream_ctx_;
+		std::optional<sstream::func_read_t> read_cb_;
+		std::optional<sstream::func_write_t> write_cb_;
+		
+		std::any ud_;
 
 		bool stop_;
-		bool reading_;
-		bool writting_;
-
 		sstream_t(sloop* loop, 
+			sstream* owner,
 			ssocket* sock, 
 			sstream_opt opt, 
-			sstream::func_read_t&& rd_cb, 
-			sstream::func_write_t&& wt_cb) {
-			loop_ = loop;
-			sock_.reset(sock);
-			opt_ = opt;
-
-			reader_ = {};
-			writer_ = {};
-
-			read_buffer_ = std::make_unique<socket_buffer>(opt.read_buffer_init);
-
-			rd_cb_ = std::forward<sstream::func_read_t>(rd_cb);
-			wt_cb_ = std::forward<sstream::func_write_t>(wt_cb);
-
-			stop_ = false;
-			reading_ = false;
-			writting_ = false;
+			sstream::stream_ctx_t&& stream_event)
+			: loop_(loop), owner_(owner),
+			sock_(sock),opt_(opt),
+			stream_ctx_(std::forward<sstream::stream_ctx_t>(stream_event)) ,
+			stop_(false)
+		{
+			shu::exception_check(!!stream_ctx_.evClose);
 		}
+		~sstream_t() {
+		}
+
 		void start() {
 			navite_attach_iocp(loop_, sock_.get());
 			navite_sock_setcallbak(sock_.get(), [this](OVERLAPPED_ENTRY* entry) {
-				OpWithCb* obcb = static_cast<OpWithCb*>(entry->lpOverlapped);
+				iocp_complete_ctx* obcb = static_cast<iocp_complete_ctx*>(entry->lpOverlapped);
 				if (obcb->cb) {
-					obcb->cb(entry);
+					obcb->cb(this, entry);
 				}
 			});
 
-			reader_.cb = [this](OVERLAPPED_ENTRY* entry) {
-				run_read(entry);
-			};
-			writer_.cb = [this](OVERLAPPED_ENTRY* entry) {
-				run_write(entry);
-			};
-
-			holder_ = shared_from_this();
-
-			auto _finally_ = s_defer([&, self = holder_](){
-				check_close_and_destroy();
-			});
-
-			post_read();
+			reader_.cb = run_read;
+			writer_.cb = run_write;
 		}
 
-		void check_close_and_destroy() {
-            if (!reading_ && !writting_) {
-                holder_.reset();
-            }
-        }
-
-		void post_read() {
-			reading_ = true;
-
+		bool post_read(std::span<buffer_t> bufs, func_read_t&& cb) {
 			auto* navite_sock = navite_cast_ssocket(sock_.get());
-			auto s = read_buffer_->prepare(opt_.read_buffer_count_per_op);
-			WSABUF buf = {.len = static_cast<ULONG>(s.size()), .buf = s.data()};
+			std::vector<WSABUF> wsa_bufs(bufs.size());
+			for(int i = 0; i < bufs.size(); ++i) {
+				wsa_bufs[i].buf = bufs[i].p;
+				wsa_bufs[i].len = bufs[i].size;
+			}
+
 			DWORD dwFlags = 0;
 			DWORD dwBytes = 0;
 
-			auto r = ::WSARecv(navite_sock->s, &buf, 1, &dwBytes, &dwBytes, &reader_, nullptr);
+			auto r = ::WSARecv(navite_sock->s, wsa_bufs.data(), wsa_bufs.size(), &dwBytes, &dwBytes, &reader_, nullptr);
 			if (r == SOCKET_ERROR) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
-					reading_ = false;
-
-					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
-					read_ctx_t ctx{ .buf = *read_buffer_};
-					rd_cb_(res, ctx);
-					return;
+					socket_io_result_t res{ .res = -e };
+					std::forward<func_read_t>(cb)(res);
+					return false;
 				}
 			}
 
+			read_cb_.emplace(std::forward<func_read_t>(cb));
+			return true;
 		}
-		void post_write(socket_buffer* buf = nullptr) {
-			if (stop_) {
-				// 调用了stop后，不再接受write
-				return;
-			}
-
-			if (buf) {
-				if (stop_) {
-					return;
-				}
-				if (!buf->ready().empty()) {
-					write_buffer_.emplace_back(std::move(*buf));
-				}
-			}
-
-			if (std::exchange(writting_, true)) {
-				return;
-			}
-
+		bool post_write(std::span<buffer_t> bufs, func_write_t&& cb) {
 			auto navite_sock = navite_cast_ssocket(sock_.get());
-			std::vector<WSABUF> buffs; buffs.reserve((write_buffer_.size()));
-			for (auto& it : write_buffer_) {
-				auto data = it.ready();
-				WSABUF buf;
-				buf.buf = data.data();
-				buf.len = static_cast<ULONG>(data.size());
-				buffs.emplace_back(buf);
+			std::vector<WSABUF> buffs(bufs.size());
+			for(int i = 0; i < bufs.size(); ++i) {
+				buffs[i].buf = bufs[i].p;
+				buffs[i].len = bufs[i].size;
 			}
+
 			DWORD dwFlags = 0;
 			DWORD dwBytes = 0;
 			auto r = ::WSASend(navite_sock->s, buffs.data(), static_cast<DWORD>(buffs.size()), &dwBytes, dwFlags, &writer_, nullptr);
 			if (r == SOCKET_ERROR) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
-					writting_ = false;
 
-					socket_io_result_t res{ .bytes = 0,.err = -1, .naviteerr = e };
-					write_ctx_t ctx{ .bufs = write_buffer_, };
-					wt_cb_(res, ctx);
-					return;
+					socket_io_result_t res{ .res = -e };
+					std::forward<func_write_t>(cb)(res);
+					return false;
 				}
+			} else {
+				socket_io_result_t res{ .res = static_cast<int>(dwBytes)};
+				std::forward<func_write_t>(cb)(res);
+				return true;
 			}
+
+			write_cb_.emplace(std::forward<func_write_t>(cb));
+			return true;
 		}
 
-		void run_read(OVERLAPPED_ENTRY* entry) {
-			reading_ = false;
-			auto _finally_ = s_defer([&, self = holder_](){
-				check_close_and_destroy();
-			});
-
-			socket_io_result_t res{ 
-				.bytes = entry->dwNumberOfBytesTransferred,
-				.err = 0,
-				.naviteerr = s_last_error() };
-			read_ctx_t ctx{ .buf = *read_buffer_ };
+		void static run_read(sstream::sstream_t* self, OVERLAPPED_ENTRY* entry) {
+			socket_io_result_t res{.res = static_cast<int>(entry->dwNumberOfBytesTransferred)};
 			if (entry->dwNumberOfBytesTransferred == 0) {
-				// fin
-				res.err = -1;
+				// fin?
+				res.res = -s_last_error();
 			}
 			
-			// 回调
-			read_buffer_->commit(entry->dwNumberOfBytesTransferred);
-			rd_cb_(res, ctx);
-
-			if (res.err < 0) {
-				if (writting_) {
-					stop();
-				}
-				return;
+			{
+				auto read_cb = std::move(self->read_cb_.value());
+				self->read_cb_.reset();
+				read_cb(res);
 			}
-			// 继续读
-			post_read();
 		}
-		void run_write(OVERLAPPED_ENTRY* entry) {
-			writting_ = false;
-			auto _finally_ = s_defer([&, self = holder_](){
-				check_close_and_destroy();
-			});
-
-			socket_io_result_t res{
-				.bytes = entry->dwNumberOfBytesTransferred,
-				.err = 0,
-				.naviteerr = s_last_error() };
-			write_ctx_t ctx{ .bufs = write_buffer_ };
-			if (entry->dwNumberOfBytesTransferred > 0) {
-
-			} else if (entry->dwNumberOfBytesTransferred == 0) {
-				res.err = -1;
+		
+		void static run_write(sstream::sstream_t* self, OVERLAPPED_ENTRY* entry) {
+			socket_io_result_t res{.res = static_cast<int>(entry->dwNumberOfBytesTransferred)};
+			if (res.res == 0) {
+				res.res = -s_last_error();
 			}
 
-			wt_cb_(res, ctx);
-
-			auto total = entry->dwNumberOfBytesTransferred;
-			auto it = write_buffer_.begin();
-			for (; it != write_buffer_.end(); ++it) {
-				total -= static_cast<DWORD>(it->consume(total));
-				auto ready = it->ready();
-				if (ready.size() > 0) {
-					break;
-				}
-			}
-			if (it != write_buffer_.begin()) {
-				write_buffer_.erase(write_buffer_.begin(), it);
+			{
+				auto write_cb = std::move(self->write_cb_.value());
+				self->write_cb_.reset();
+				write_cb(res);
 			}
 
-			if (res.err < 0) {
-				// 写失败
-				if (sock_ && sock_->valid()) {
-					sock_->shutdown(shutdown_type::shutdown_write);
-				}
-				return;
-			}
-
-			if (!write_buffer_.empty()) {
-				post_write();
-			}
-
-			if (!writting_ && stop_) {
-				if (sock_ && sock_->valid()) {
-					sock_->shutdown(shutdown_type::shutdown_write);
-					auto* navite_sock = navite_cast_ssocket(sock_.get());
-					::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
-				}
+			if(self->stop_) {
+				self->loop_->post([cb = std::move(self->stream_ctx_.evClose), owner = self->owner_](){
+					cb(owner);
+				});
 			}
 		}
 
@@ -240,63 +153,95 @@ namespace shu {
 				return;
 			}
 
-			if (writting_) {
+			if (write_cb_) {
+				// wait writing
 				return;
 			}
-
-			auto _finally_ = s_defer([&, self = holder_](){
-				check_close_and_destroy();
-			});
 			auto* navite_sock = navite_cast_ssocket(sock_.get());
 			sock_->shutdown(shutdown_type::shutdown_write);
-			::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
+			if (read_cb_) {
+				::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
+			} else {
+				loop_->post([cb = std::move(stream_ctx_.evClose), owner = owner_](){
+					cb(owner);
+				});
+			}
 		}
 	};
 	
-	sstream::sstream()
+	sstream::sstream():s_(nullptr)
 	{
-
+		
 	}
 
 	sstream::sstream(sstream&& other) noexcept
 	{
-		s_.swap(other.s_);
+		s_ = std::exchange(other.s_, nullptr);
 	}
 
 	sstream::~sstream()
 	{
-		if (auto sptr = s_.lock()) {
-
+		if (s_) {
+			delete s_;
 		}
+	}
+
+	auto sstream::option() -> sstream_opt {
+		shu::exception_check(s_);
+		return s_->opt_;
+	}
+
+	auto sstream::loop() -> sloop* {
+		shu::exception_check(s_);
+		return s_->loop_;
 	}
 
 	void sstream::start(sloop* l, ssocket* s, sstream_opt opt,
-		sstream::func_read_t&& rcb, sstream::func_write_t&& wcb)
+		stream_ctx_t&& stream_event)
 	{
-		auto sptr = std::make_shared<sstream::sstream_t>(l, s, opt, std::forward<func_read_t>(rcb), std::forward<func_write_t>(wcb));
-		s_ = sptr;
+		exception_check(!s_);
+		l->assert_thread();
 
-		l->dispatch([sptr]() {
-			sptr->start();
-		});
+		auto ptr = std::make_unique<sstream_t>(l, this, s, opt, std::forward<stream_ctx_t>(stream_event));
+		ptr->start();
+		s_ = ptr.release();
 	}
 
-	void sstream::write(socket_buffer&& buf)
+	auto sstream::set_ud(std::any a) -> std::any* {
+		s_->ud_.swap(a);
+		return &s_->ud_;
+	}
+	auto sstream::get_ud() -> std::any* {
+		return &s_->ud_;
+	}
+
+	bool sstream::read(buffer_t buf, func_read_t&& cb) {
+		exception_check(s_);
+		buffer_t bufs[1] = {buf};
+		return s_->post_read(bufs, std::forward<func_read_t>(cb));
+	}
+
+	bool sstream::read(std::span<buffer_t> bufs, func_read_t&& cb) {
+		exception_check(s_);
+		return s_->post_read(bufs, std::forward<func_read_t>(cb));
+	}
+
+	bool sstream::write(buffer_t buf, func_write_t&& cb)
 	{
-		if (auto sptr = s_.lock()) {
-			sptr->loop_->dispatch([sptr, buf = { std::move(buf) }]() mutable {
-				sptr->post_write(const_cast<socket_buffer*>(buf.begin()));
-			});
-		}
+		exception_check(s_);
+		buffer_t bufs[1] = {buf};
+		return s_->post_write(bufs, std::forward<func_write_t>(cb));
+	}
+
+	bool sstream::write(std::span<buffer_t> bufs, func_write_t&& cb) {
+		exception_check(s_);
+		return s_->post_write(bufs, std::forward<func_write_t>(cb));
 	}
 
 	void sstream::stop()
 	{
-		if (auto sptr = s_.lock()) {
-			sptr->loop_->dispatch([sptr]() {
-				sptr->stop();
-			});
-		}
+		exception_check(s_);
+		s_->stop();
 	}
 
 };

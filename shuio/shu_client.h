@@ -10,16 +10,23 @@ namespace shu {
 
     class sclient {
         struct sclient_t;
-        std::weak_ptr<sclient_t> s_;
+        sclient_t* s_;
         S_DISABLE_COPY(sclient);
     public:
-        using func_connect_t = std::function<void(socket_io_result, std::unique_ptr<ssocket>, addr_pair_t)>;
+        using func_connect_t = std::function<void(socket_io_result, ssocket*, addr_pair_t)>;
+        using func_close_t = std::function<void(sclient*)>;
+
+        struct sclient_ctx {
+			func_close_t evClose;
+			func_connect_t evConn;
+		};
 
         sclient();
         sclient(sclient&& other) noexcept;
         ~sclient();
 
-        void start(sloop*, addr_storage_t, func_connect_t&&);
+        bool start(sloop*, addr_storage_t, sclient_ctx&&);
+        auto loop() -> sloop*;
         void stop();
     };
 };

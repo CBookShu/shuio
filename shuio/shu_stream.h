@@ -3,51 +3,61 @@
 #include "shu_buffer.h"
 #include <memory>
 #include <span>
+#include <any>
 
 namespace shu {
 
 	struct sstream_opt {
 		addr_pair_t addr;
-		// 读写缓存buffer上限
-		std::size_t read_buffer_limit = 1024 * 1024 * 20;
-		std::size_t write_buffer_limit = 1024 * 1024 * 20;
-		// 读写缓存初始大小
-		std::size_t read_buffer_init = 1024;
-		std::size_t write_buffer_init = 1024;
-		// 每次读的大小
-		std::size_t read_buffer_count_per_op = 4096;
 	};
 
 	class sloop;
 	class ssocket;
-	class socket_buffer;
-	struct read_ctx_t {
-		socket_buffer& buf;
-	};
-	struct write_ctx_t {
-		std::vector<socket_buffer>& bufs;
-	};
 	class sstream
 	{
 		struct sstream_t;
-		std::weak_ptr<sstream_t> s_;
+		sstream_t* s_;
 		S_DISABLE_COPY(sstream);
 	public:
+		using func_read_t = std::function<void(socket_io_result_t)>;
+		using func_write_t = std::function<void(socket_io_result_t)>;
+		using func_close_t = std::function<void(sstream*)>;
 
-		using func_read_t = std::function<void(socket_io_result_t, read_ctx_t&)>;
-		using func_write_t = std::function<void(socket_io_result_t, write_ctx_t&)>;
+		struct stream_ctx_t {
+			func_close_t evClose;
+		};
 
 		sstream();
 		sstream(sstream&&) noexcept;
 		~sstream();
 
+		auto option() -> sstream_opt;
+		auto loop() -> sloop*;
+
 		// just call once after new
 		void start(
 			sloop*, ssocket*, sstream_opt opt, 
-			func_read_t&& rcb, func_write_t&& wcb);
+			stream_ctx_t&& stream_event);
 
-		// call after start read
-		void write(socket_buffer&& );
+		auto set_ud(std::any a) -> std::any*;
+		auto get_ud() -> std::any*;
+		template<typename T>
+		decltype(auto) get_ud_t() {
+			auto* a = get_ud();
+			return std::any_cast<T>(a);
+		}
+		template<typename T, typename... Args>
+		decltype(auto) set_ud_t(Args&&...args) {
+			auto* a = set_ud(std::make_any<T>(std::forward<Args>(args)...));
+			return std::any_cast<T>(a);
+		}
+
+		// TODO: 支持read和write 重复多次调用
+		bool read(buffer_t buf, func_read_t&& cb);
+		bool read(std::span<buffer_t> bufs, func_read_t&& cb);
+
+		bool write(buffer_t buf, func_write_t&& cb);
+		bool write(std::span<buffer_t> bufs, func_write_t&& cb);
 		// call after start read
 		void stop();
 	};

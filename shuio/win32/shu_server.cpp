@@ -6,55 +6,92 @@
 
 namespace shu {
 
-	struct sserver::sserver_t : std::enable_shared_from_this<sserver::sserver_t> {
+	struct sserver::sserver_t {
 		struct acceptor_complete_t : OVERLAPPED {
 			enum { buffer_size = (sizeof(sockaddr) + 16) * 2 };
 
 			std::unique_ptr<ssocket> sock_;
 			char buffer_[buffer_size];
 
-			std::shared_ptr<sserver::sserver_t> holder_;
+			bool doing_;
 
-			acceptor_complete_t() {
+			acceptor_complete_t()
+			: doing_(false)
+			{
 				std::memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
 			}
 		};
 		
 		sloop* loop_;
+		sserver* owner_;
 		std::unique_ptr<ssocket> sock_;
 		addr_storage_t addr_;
-		sserver::func_newclient_t creator_;
-		acceptor_complete_t accept_op[1];
+		sockaddr_storage sock_addr_;
+		sserver::event_ctx server_ctx_;
+		std::vector<acceptor_complete_t> accept_ops;
 		bool stop_;
 
-		sserver_t(sloop* loop, sserver::func_newclient_t&& creator, addr_storage_t addr) {
-			loop_ = loop;
-			stop_ = false;
-			creator_ = std::forward<sserver::func_newclient_t>(creator);
-			addr_ = addr;
+		sserver_t(sloop* loop, sserver* owner, event_ctx&& server_ctx, addr_storage_t addr)
+		: loop_(loop), owner_(owner), addr_(addr),
+		server_ctx_(std::forward<event_ctx>(server_ctx)), stop_(false)
+		{
+			shu::exception_check(!!server_ctx_.evConn);
 		}
 		~sserver_t() {
 			
 		}
 
-		void start() {
+		void post_close() {
+			if (server_ctx_.evClose) {
+				loop_->post([cb = std::move(server_ctx_.evClose), owner = owner_](){
+					cb(owner);
+				});
+			}
+		}
+
+		bool start() {
 			// 先创建 sock和对应的bind和listen
-			sock_ = std::make_unique<ssocket>();
-			sock_->init(addr_.udp == 1);
+			addrinfo hints { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
+            addrinfo *server_info {nullptr};
+			std::string_view ip(addr_.ip.data());
+			std::string service = std::to_string(addr_.port);
+			int rv = getaddrinfo(ip.data(), service.c_str(), &hints, &server_info);
+            if(rv != 0) {
+				socket_io_result_t res{ .res = -s_last_error() };
+				server_ctx_.evConn(res, nullptr, addr_pair_t{.local = addr_});
+				return false;
+            }
+            auto f_deleter = [](addrinfo* p){ freeaddrinfo(p);};
+            std::unique_ptr<addrinfo, void(*)(addrinfo*)> ptr(server_info, f_deleter);
+			int last_erro;
+            for (auto p = server_info; p != nullptr; p = p->ai_next) {
+                std::unique_ptr<ssocket> ptr_sock = std::make_unique<ssocket>();
+
+                ptr_sock->init(p->ai_socktype == SOCK_DGRAM, p->ai_family ==AF_INET6);
+                if (!ptr_sock->bind(p->ai_addr, p->ai_addrlen)) {
+					last_erro = s_last_error();
+                    continue;
+                }
+				
+				if(!ptr_sock->listen()) {
+					last_erro = s_last_error();
+					continue;
+				}
+
+				shu::exception_check(sizeof(sock_addr_) >=  p->ai_addrlen);
+				std::memcpy(&sock_addr_, p->ai_addr, p->ai_addrlen);
+				sock_.swap(ptr_sock);
+                break;
+            }
+
+			if(!sock_) {
+				socket_io_result_t res{ .res = -s_last_error() };
+				server_ctx_.evConn(res, nullptr, addr_pair_t{.local = addr_});
+				return false;
+			}
+
 			sock_->reuse_addr(true);
 			sock_->noblock(true);
-
-			if (!addr_.udp) {
-				if (!sock_->bind(addr_)) {
-					return;
-				}
-				if (!sock_->listen()) {
-					return;
-				}
-			}
-			else {
-				// TODO: UDP 直接进行read操作
-			}
 
 			// 绑定IOCP 并开始post accept
 			navite_attach_iocp(loop_, sock_.get());
@@ -62,21 +99,23 @@ namespace shu {
 				run(entry);
 			});
 
-			for (auto& acceptor : accept_op) {
-				acceptor.holder_ = shared_from_this();
-				if (!post_acceptor(&acceptor)) {
-					stop();
-					return;
+			accept_ops.resize(4);
+			int doing_count = 0;
+			for (auto& op:accept_ops) {
+				if (post_acceptor(&op)) {
+					doing_count++;
 				}
 			}
-			return ;
+
+			return doing_count > 0;
 		}
 
 		bool post_acceptor(acceptor_complete_t* acceptor) {
-			auto tmp(std::move(acceptor->holder_));
-
+			if(stop_) {
+				return false;
+			}
 			acceptor->sock_ = std::make_unique<ssocket>();
-			acceptor->sock_->init(addr_.udp);
+			acceptor->sock_->init(false, sock_addr_.ss_family == AF_INET6);
 
 			auto* client_sock = navite_cast_ssocket(acceptor->sock_.get());
 			auto* server_sock = navite_cast_ssocket(sock_.get());
@@ -91,15 +130,18 @@ namespace shu {
 			if (!r) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
+					socket_io_result_t res{ .res = -s_last_error() };
+					server_ctx_.evConn(res, nullptr, addr_pair_t{.local = addr_});
 					return false;
 				}
 			}
-			acceptor->holder_.swap(tmp);
+			acceptor->doing_ = true;
 			return true;
 		}
 
 		void run(OVERLAPPED_ENTRY* entry) {
 			auto* op = static_cast<struct acceptor_complete_t*>(entry->lpOverlapped);
+			op->doing_ = false;
 
 			SOCKADDR_IN* ClientAddr = NULL;
 			SOCKADDR_IN* LocalAddr = NULL;
@@ -114,26 +156,27 @@ namespace shu {
 			
 			addr_pair_t addr{};
 			addr.remote.port = ntohs(ClientAddr->sin_port);
-			addr.remote.ip.resize(64);
 			inet_ntop(AF_INET, &ClientAddr->sin_addr, addr.remote.ip.data(), addr.remote.ip.size());
-			addr.remote.udp = addr_.udp;
 
 			addr.local.port = ntohs(LocalAddr->sin_port);
-			addr.local.ip.resize(64);
 			inet_ntop(AF_INET, &LocalAddr->sin_addr, addr.local.ip.data(), addr.local.ip.size());
-			addr.local.udp = addr_.udp;
 
-			socket_io_result_t res{ .err = 0 };
-			creator_(res, std::move(op->sock_), addr);
+			socket_io_result_t res{ .res = 1 };
+			server_ctx_.evConn(res, op->sock_.release(), addr);
 
 			if (stop_) {
-				op->holder_.reset();
+				int left = 0;
+				for(auto& op:accept_ops) {
+					if (op.doing_) {
+						left++;
+					}
+				}
+				if(left == 0) {
+					post_close();
+				}
 			}
 			else if(!post_acceptor(op)) {
-				// error 
-				socket_io_result_t res_err{ .err = 1, .naviteerr = s_last_error() };
-				creator_(res_err, nullptr, {});
-				stop();
+				// post_acceptor err will call callback
 			}
 		}
 	
@@ -143,45 +186,53 @@ namespace shu {
 			}
 
 			auto* navite_sock = navite_cast_ssocket(sock_.get());
-			for (auto& acceptor : accept_op) {
-				::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &acceptor);
+			bool cancel = false;
+			for (auto& op : accept_ops) {
+				if(op.doing_) {
+					::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &op);
+					cancel = true;
+				}
 			}
-			sock_->close();
+			if (!cancel) {
+				post_close();
+			}
 		}
 	};
 
-	sserver::sserver()
+	sserver::sserver():s_(nullptr)
 	{
 	}
 
 	sserver::sserver(sserver&& other) noexcept
 	{
-		s_.swap(other.s_);
+		s_ = std::exchange(other.s_, nullptr);
 	}
 
 	sserver::~sserver()
 	{
-		if (auto sptr = s_.lock()) {
-
+		if(s_) {
+			delete s_;
 		}
 	}
 
-	void sserver::start(sloop* loop, func_newclient_t&& creator, addr_storage_t addr)
+	bool sserver::start(sloop* loop, event_ctx&& ctx,addr_storage_t addr)
 	{
-		auto sptr = std::make_shared<sserver_t>(loop, std::forward<func_newclient_t>(creator), addr);
-		s_ = sptr;
-		loop->dispatch([sptr]() {
-			sptr->start();
-		});
+		shu::exception_check(!s_);
+		auto ptr = std::make_unique<sserver_t>(loop, this, std::forward<event_ctx>(ctx), addr);
+		auto r = ptr->start();
+		s_ = ptr.release();
+		return r;
+	}
+
+	auto sserver::loop() -> sloop* {
+		shu::exception_check(s_);
+		return s_->loop_;
 	}
 
 	void sserver::stop()
 	{
-		if (auto sptr = s_.lock()) {
-			sptr->loop_->dispatch([sptr]() {
-				sptr->stop();
-			});
-		}
+		shu::exception_check(s_);
+		s_->stop();
 	}
 
 };

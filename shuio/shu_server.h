@@ -12,17 +12,24 @@ namespace shu {
 	class sserver
 	{
 		struct sserver_t;
-		std::weak_ptr<sserver_t> s_;
+		sserver_t* s_;
 		S_DISABLE_COPY(sserver);
 	public:
 		using func_newclient_t = \
-			std::function<void(socket_io_result_t,std::unique_ptr<ssocket>, addr_pair_t)>;
+			std::function<void(socket_io_result_t,ssocket*, addr_pair_t)>;
+		using func_close_t = std::function<void(sserver*)>;
+
+		struct event_ctx {
+			func_close_t evClose;
+			func_newclient_t evConn;
+		};
 
 		sserver();
 		sserver(sserver&&) noexcept;
 		~sserver();
 
-		void start(sloop*,func_newclient_t&& ,addr_storage_t);
+		bool start(sloop*,event_ctx&&,addr_storage_t);
+		auto loop() -> sloop*;
 		void stop();
 	};
 };

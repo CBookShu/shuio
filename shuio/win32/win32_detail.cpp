@@ -6,6 +6,8 @@ namespace shu {
     AcceptExPtr win32_extension_fns::AcceptEx;
     ConnectExPtr win32_extension_fns::ConnectEx;
     GetAcceptExSockaddrsPtr win32_extension_fns::GetAcceptExSockaddrs;
+    int win32_extension_fns::tcp_non_ifs_lsp_ipv4 = 1;
+    int win32_extension_fns::tcp_non_ifs_lsp_ipv6 = 1;
 
     static void*
         get_extension_function(SOCKET s, const GUID* which_fn)
@@ -33,7 +35,32 @@ namespace shu {
         win32_extension_fns::ConnectEx = (ConnectExPtr)get_extension_function(s, &connectex);
         win32_extension_fns::GetAcceptExSockaddrs = (GetAcceptExSockaddrsPtr)get_extension_function(s,
             &getacceptexsockaddrs);
+
+        WSAPROTOCOL_INFOW protocol_info;
+        int opt_len = (int) sizeof protocol_info;
+        if (getsockopt(s,
+                SOL_SOCKET,
+                SO_PROTOCOL_INFOW,
+                (char*) &protocol_info,
+                &opt_len) == 0) {
+        if (protocol_info.dwServiceFlags1 & XP1_IFS_HANDLES)
+            win32_extension_fns::tcp_non_ifs_lsp_ipv4 = 0;
+        }
         closesocket(s);
+
+        SOCKET dummy = socket(AF_INET6, SOCK_STREAM, IPPROTO_IP);
+        if (dummy != INVALID_SOCKET) {
+        opt_len = (int) sizeof protocol_info;
+        if (getsockopt(dummy,
+                        SOL_SOCKET,
+                        SO_PROTOCOL_INFOW,
+                        (char*) &protocol_info,
+                        &opt_len) == 0) {
+            if (protocol_info.dwServiceFlags1 & XP1_IFS_HANDLES)
+                win32_extension_fns::tcp_non_ifs_lsp_ipv6 = 0;
+            }
+            closesocket(dummy);
+        }
     }
 
 

@@ -31,14 +31,17 @@ namespace shu {
 	}
 	int s_last_error()
 	{
-		return ::WSAGetLastError();
+		// TODO: need atomic op?
+		int e = ::WSAGetLastError();
+		::WSASetLastError(0);
+		return e;
 	}
 
 	void sockaddr_2_storage(void* p, addr_storage_t* storage) {
 		auto* addr = static_cast<struct sockaddr_in*>(p);
 		storage->port = ntohl(addr->sin_port);
-		storage->ip.resize(64);
-		::inet_ntop(AF_INET, addr, storage->ip.data(), storage->ip.size());
+		std::string_view sip(storage->ip.data());
+		::inet_ntop(AF_INET, addr, const_cast<char*>(sip.data()), sip.size());
 	}
 	bool storage_2_sockaddr(addr_storage_t* storage, void* p) {
 		auto* addr = static_cast<struct sockaddr_in*>(p);

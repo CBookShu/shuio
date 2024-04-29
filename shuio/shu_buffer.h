@@ -59,5 +59,10 @@ namespace shu {
 		void reset();
 	};
 
+	typedef struct buffer_t {
+		char* 	p;
+		int 	size;
+	}buffer_t;
+
 };
 

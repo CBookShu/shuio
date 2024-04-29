@@ -16,7 +16,7 @@ namespace shu {
 			}
 		}
 
-		void init(bool udp) {
+		void init(bool udp, bool v6) {
 			shu::exception_check(s == INVALID_SOCKET);
 			int type = SOCK_STREAM;
 			int protocol = IPPROTO_TCP;
@@ -24,9 +24,26 @@ namespace shu {
 				type = SOCK_DGRAM;
 				protocol = IPPROTO_UDP;
 			}
+			int family = AF_INET;
+			if (v6) {
+				family = AF_INET6;
+			}
 			s = ::WSASocket(AF_INET, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
 			shu::exception_check(s != INVALID_SOCKET);
-			opt_.flags.udp = udp ? 1 : 0;
+
+			bool non_ifs_lsp;
+			if (family == AF_INET6) {
+				non_ifs_lsp = win32_extension_fns::tcp_non_ifs_lsp_ipv6;
+			} else {
+				non_ifs_lsp = win32_extension_fns::tcp_non_ifs_lsp_ipv4;
+			}
+			if(!non_ifs_lsp) {
+				UCHAR sfcnm_flags =
+					FILE_SKIP_SET_EVENT_ON_HANDLE | FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
+				if (!SetFileCompletionNotificationModes((HANDLE) s, sfcnm_flags)) {
+					shu::exception_check(false, "HANDLE_SYNC_BYPASS_IOCP");
+				}
+			}
 		}
 
 		bool noblock(bool flag) {
@@ -70,21 +87,8 @@ namespace shu {
 			return false;
 		}
 
-		bool bind(addr_storage_t addr) {
-			sockaddr_in addr_in{};
-			addr_in.sin_family = AF_INET;
-			addr_in.sin_port = htons(addr.port);
-			if (addr.ip.empty()) {
-				addr_in.sin_addr = in4addr_any;
-			}
-			else {
-				auto r = ::inet_pton(AF_INET, addr.ip.data(), &addr_in.sin_addr);
-				if (r != 1) {
-					return false;
-				}
-			}
-
-			auto r = ::bind(s, (struct sockaddr*)&addr_in, sizeof(addr_in));
+		bool bind(struct sockaddr* addr, std::size_t len) {
+			auto r = ::bind(s, addr, len);
 			return r != SOCKET_ERROR;
 		}
 
@@ -139,9 +143,9 @@ namespace shu {
 		return ss_;
 	}
 
-	void ssocket::init(bool udp)
+	void ssocket::init(bool udp, bool v6)
 	{
-		return ss_->init(udp);
+		return ss_->init(udp, v6);
 	}
 
 	auto ssocket::option() -> const ssocket_opt*
@@ -169,9 +173,9 @@ namespace shu {
 		return ss_->nodelay(flag);
 	}
 
-	auto ssocket::bind(addr_storage_t addr) -> bool
+	auto ssocket::bind(void* addr, std::size_t len) -> bool
 	{
-		return ss_->bind(addr);
+		return ss_->bind((struct sockaddr*)addr, len);
 	}
 
 	auto ssocket::listen() -> bool
