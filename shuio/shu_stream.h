@@ -19,8 +19,7 @@ namespace shu {
 		sstream_t* s_;
 		S_DISABLE_COPY(sstream);
 	public:
-		using func_read_t = std::function<void(socket_io_result_t)>;
-		using func_write_t = std::function<void(socket_io_result_t)>;
+		using func_op_t = std::function<void(socket_io_result_t)>;
 		using func_close_t = std::function<void(sstream*)>;
 
 		struct stream_ctx_t {
@@ -42,11 +41,11 @@ namespace shu {
 		auto get_ud() -> std::any*;
 
 		// TODO: 支持read和write 重复多次调用
-		bool read(buffer_t buf, func_read_t&& cb);
-		bool read(std::span<buffer_t> bufs, func_read_t&& cb);
+		bool read(buffer_t buf, func_op_t&& cb);
+		bool read(std::span<buffer_t> bufs, func_op_t&& cb);
 
-		bool write(buffer_t buf, func_write_t&& cb);
-		bool write(std::span<buffer_t> bufs, func_write_t&& cb);
+		bool write(buffer_t buf, func_op_t&& cb);
+		bool write(std::span<buffer_t> bufs, func_op_t&& cb);
 		// call after start read
 		void stop();
 	};

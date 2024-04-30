@@ -83,4 +83,16 @@ namespace shu {
 		return std::any_cast<T>(a);
 	}
 	// common user end
+
+	template <typename T>
+	requires(std::is_trivial_v<T>)
+	void zero_mem(T* t) {
+		std::memset(t, 0, sizeof(T));
+	}
+
+	template <typename T>
+	requires(std::is_trivial_v<T>)
+	void zero_mem(T& t) {
+		std::memset(&t, 0, sizeof(T));
+	}
 };
