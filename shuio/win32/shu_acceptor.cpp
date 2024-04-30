@@ -1,4 +1,4 @@
-#include "shuio/shu_server.h"
+#include "shuio/shu_acceptor.h"
 #include "win32_detail.h"
 #include "shuio/shu_loop.h"
 #include "shuio/shu_socket.h"
@@ -6,7 +6,7 @@
 
 namespace shu {
 
-	struct sserver::sserver_t {
+	struct sacceptor::sacceptor_t {
 		struct acceptor_complete_t : OVERLAPPED {
 			enum { buffer_size = (sizeof(sockaddr) + 16) * 2 };
 
@@ -23,21 +23,21 @@ namespace shu {
 		};
 		
 		sloop* loop_;
-		sserver* owner_;
+		sacceptor* owner_;
 		std::unique_ptr<ssocket> sock_;
 		addr_storage_t addr_;
 		sockaddr_storage sock_addr_;
-		sserver::event_ctx server_ctx_;
+		sacceptor::event_ctx server_ctx_;
 		std::vector<acceptor_complete_t> accept_ops;
 		bool stop_;
 
-		sserver_t(sloop* loop, sserver* owner, event_ctx&& server_ctx, addr_storage_t addr)
+		sacceptor_t(sloop* loop, sacceptor* owner, event_ctx&& server_ctx, addr_storage_t addr)
 		: loop_(loop), owner_(owner), addr_(addr),
 		server_ctx_(std::forward<event_ctx>(server_ctx)), stop_(false)
 		{
 			shu::panic(!!server_ctx_.evConn);
 		}
-		~sserver_t() {
+		~sacceptor_t() {
 			
 		}
 
@@ -199,37 +199,37 @@ namespace shu {
 		}
 	};
 
-	sserver::sserver():s_(nullptr)
+	sacceptor::sacceptor():s_(nullptr)
 	{
 	}
 
-	sserver::sserver(sserver&& other) noexcept
+	sacceptor::sacceptor(sacceptor&& other) noexcept
 	{
 		s_ = std::exchange(other.s_, nullptr);
 	}
 
-	sserver::~sserver()
+	sacceptor::~sacceptor()
 	{
 		if(s_) {
 			delete s_;
 		}
 	}
 
-	bool sserver::start(sloop* loop, event_ctx&& ctx,addr_storage_t addr)
+	bool sacceptor::start(sloop* loop, event_ctx&& ctx,addr_storage_t addr)
 	{
 		shu::panic(!s_);
-		auto ptr = std::make_unique<sserver_t>(loop, this, std::forward<event_ctx>(ctx), addr);
+		auto ptr = std::make_unique<sacceptor_t>(loop, this, std::forward<event_ctx>(ctx), addr);
 		auto r = ptr->start();
 		s_ = ptr.release();
 		return r;
 	}
 
-	auto sserver::loop() -> sloop* {
+	auto sacceptor::loop() -> sloop* {
 		shu::panic(s_);
 		return s_->loop_;
 	}
 
-	void sserver::stop()
+	void sacceptor::stop()
 	{
 		shu::panic(s_);
 		s_->stop();

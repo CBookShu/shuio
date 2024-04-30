@@ -3,7 +3,7 @@
 
 #include <iostream>
 #include "shuio/shu_loop.h"
-#include "shuio/shu_server.h"
+#include "shuio/shu_acceptor.h"
 #include "shuio/shu_stream.h"
 #include "shuio/shu_buffer.h"
 #include "shuio/shu_client.h"
@@ -95,7 +95,7 @@ public:
     :loop_(loop)
     {
         auto ok = server_.start(&loop_, {
-            .evClose = [](sserver*){},
+            .evClose = [](sacceptor*){},
             .evConn = [this](socket_io_result_t res,
                 ssocket* sock,
                 addr_pair_t addr) {
@@ -169,7 +169,7 @@ public:
     }
 private:
     sloop& loop_;
-    sserver server_;
+    sacceptor server_;
     // int req_;
     // std::unordered_map<int, sstream> streams_;
     std::pmr::unsynchronized_pool_resource pool_;
@@ -218,7 +218,7 @@ static void pingpong_server(int argc, char** argv) {
     */
 
     sloop l({});
-    sserver svr;
+    sacceptor svr;
 
     // sstream server_stream;
     // auto server_stream_read = [&](socket_io_result_t res, read_ctx_t& r) {

@@ -9,24 +9,24 @@ namespace shu {
 	class sloop;
 	class ssocket;
 
-	class sserver
+	class sacceptor
 	{
-		struct sserver_t;
-		sserver_t* s_;
-		S_DISABLE_COPY(sserver);
+		struct sacceptor_t;
+		sacceptor_t* s_;
+		S_DISABLE_COPY(sacceptor);
 	public:
 		using func_newclient_t = \
 			std::function<void(socket_io_result_t,ssocket*, addr_pair_t)>;
-		using func_close_t = std::function<void(sserver*)>;
+		using func_close_t = std::function<void(sacceptor*)>;
 
 		struct event_ctx {
 			func_close_t evClose;
 			func_newclient_t evConn;
 		};
 
-		sserver();
-		sserver(sserver&&) noexcept;
-		~sserver();
+		sacceptor();
+		sacceptor(sacceptor&&) noexcept;
+		~sacceptor();
 
 		bool start(sloop*,event_ctx&&,addr_storage_t);
 		auto loop() -> sloop*;
