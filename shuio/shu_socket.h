@@ -38,15 +38,15 @@ namespace shu {
 		// iptype: 0 tcp, 1 udp
 		void init(bool udp = false, bool v6 = false);
 		auto option() -> const ssocket_opt*;
-		auto noblock(bool) -> bool;
-		auto reuse_addr(bool) -> bool;
-		auto reuse_port(bool) -> bool;	// win32 应该是不支持的
-		auto nodelay(bool) -> bool;
-		auto bind(void*, std::size_t) -> bool;
-		auto listen() -> bool;
+		int noblock(bool);
+		int reuse_addr(bool);
+		int reuse_port(bool);	// win32 应该是不支持的
+		int nodelay(bool);
+		int bind(void*, std::size_t);
+		int listen();
 		void close();
 		bool valid();
-		void shutdown(shutdown_type how = shutdown_type::shutdown_both);
+		int shutdown(shutdown_type how = shutdown_type::shutdown_both);
 	};
 };
 

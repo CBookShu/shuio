@@ -46,54 +46,59 @@ namespace shu {
 			}
 		}
 
-		bool noblock(bool flag) {
+		int noblock(bool flag) {
 			if (opt_.flags.noblock == flag) {
-				return true;
+				return 1;
 			}
 			u_long i = flag;
 			auto r = ::ioctlsocket(s, FIONBIO, (&i));
 			if (r == 0) {
 				opt_.flags.noblock = flag;
-				return true;
+				return 1;
 			}
-			return false;
+			return -s_last_error();
 		}
 
-		bool reuse_addr(bool flag)
+		int reuse_addr(bool flag)
 		{
 			if (opt_.flags.reuse_addr == flag) {
-				return true;
+				return 1;
 			}
 			u_long i = flag;
 			auto r = ::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)(&i), sizeof(i));
 			if (r == 0) {
 				opt_.flags.reuse_addr = flag;
-				return true;
+				return 1;
 			}
-			return false;
+			return -s_last_error();
 		}
 
-		bool nodelay(bool flag)
+		int nodelay(bool flag)
 		{
 			if (opt_.flags.nodelay == flag) {
-				return true;
+				return 1;
 			}
 			u_long i = flag;
 			auto r = ::setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char*)(&i), sizeof(i));
 			if (r == 0) {
 				opt_.flags.nodelay = flag;
-				return true;
+				return 1;
 			}
-			return false;
+			return -s_last_error();
 		}
 
-		bool bind(struct sockaddr* addr, std::size_t len) {
-			auto r = ::bind(s, addr, len);
-			return r != SOCKET_ERROR;
+		int bind(struct sockaddr* addr, std::size_t len) {
+			if(::bind(s, addr, len) != SOCKET_ERROR) {
+				return 1;
+			}
+			return -s_last_error();
 		}
 
-		bool listen() {
-			return ::listen(s, SOMAXCONN) != SOCKET_ERROR;
+		int listen() {
+			if(::listen(s, SOMAXCONN) != SOCKET_ERROR) {
+				return 1;
+			}
+			return -s_last_error();
 		}
 
 		void close() {
@@ -107,14 +112,17 @@ namespace shu {
 			return s != INVALID_SOCKET;
 		}
 
-		void shutdown(shutdown_type how) {
+		int shutdown(shutdown_type how) {
 			int t = SD_RECEIVE;
 			if (how == shutdown_type::shutdown_write)
 				t = SD_SEND;
 			else if(how == shutdown_type::shutdown_both){
 				t = SD_BOTH;
 			}
-			::shutdown(s, t);
+			if(::shutdown(s, t) != SOCKET_ERROR) {
+				return 1;
+			}
+			return -s_last_error();
 		}
 	};
 
@@ -153,32 +161,32 @@ namespace shu {
 		return &ss_->opt_;
 	}
 
-	auto ssocket::noblock(bool flag) -> bool
+	int ssocket::noblock(bool flag)
 	{
 		return ss_->noblock(flag);
 	}
 
-	auto ssocket::reuse_addr(bool flag) -> bool
+	int ssocket::reuse_addr(bool flag)
 	{
 		return ss_->reuse_addr(flag);
 	}
 
-	auto ssocket::reuse_port(bool) -> bool
+	int ssocket::reuse_port(bool)
 	{
-		return false;
+		return 0;
 	}
 
-	auto ssocket::nodelay(bool flag) -> bool
+	int ssocket::nodelay(bool flag)
 	{
 		return ss_->nodelay(flag);
 	}
 
-	auto ssocket::bind(void* addr, std::size_t len) -> bool
+	int ssocket::bind(void* addr, std::size_t len)
 	{
 		return ss_->bind((struct sockaddr*)addr, len);
 	}
 
-	auto ssocket::listen() -> bool
+	int ssocket::listen()
 	{
 		return ss_->listen();
 	}
@@ -193,7 +201,7 @@ namespace shu {
 		return ss_->valid();
 	}
 
-	void ssocket::shutdown(shutdown_type how)
+	int ssocket::shutdown(shutdown_type how)
 	{
 		return ss_->shutdown(how);
 	}
