@@ -25,14 +25,14 @@ namespace shu {
 		sloop* loop_;
 		sacceptor* owner_;
 		std::unique_ptr<ssocket> sock_;
-		addr_storage_t addr_;
-		sockaddr_storage sock_addr_;
+		addr_pair_t addr_pair_;
+		int aftype_;
 		sacceptor::event_ctx server_ctx_;
 		std::vector<acceptor_complete_t> accept_ops;
 		bool stop_;
 
 		sacceptor_t(sloop* loop, sacceptor* owner, event_ctx&& server_ctx, addr_storage_t addr)
-		: loop_(loop), owner_(owner), addr_(addr),
+		: loop_(loop), owner_(owner), addr_pair_{.local = addr},aftype_(AF_UNSPEC),
 		server_ctx_(std::forward<event_ctx>(server_ctx)), stop_(false)
 		{
 			shu::panic(!!server_ctx_.evConn);
@@ -53,12 +53,12 @@ namespace shu {
 			// 先创建 sock和对应的bind和listen
 			addrinfo hints { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
             addrinfo *server_info {nullptr};
-			std::string_view ip(addr_.ip.data());
-			std::string service = std::to_string(addr_.port);
+			std::string_view ip(addr_pair_.local.ip.data());
+			std::string service = std::to_string(addr_pair_.local.port);
 			int rv = getaddrinfo(ip.data(), service.c_str(), &hints, &server_info);
             if(rv != 0) {
 				socket_io_result_t res{ .res = -s_last_error() };
-				server_ctx_.evConn(res, nullptr, addr_pair_t{.local = addr_});
+				server_ctx_.evConn(res, nullptr, addr_pair_);
 				return false;
             }
             auto f_deleter = [](addrinfo* p){ freeaddrinfo(p);};
@@ -78,15 +78,14 @@ namespace shu {
 					continue;
 				}
 
-				shu::panic(sizeof(sock_addr_) >=  p->ai_addrlen);
-				std::memcpy(&sock_addr_, p->ai_addr, p->ai_addrlen);
+				aftype_ = p->ai_family;
 				sock_.swap(ptr_sock);
                 break;
             }
 
 			if(!sock_) {
 				socket_io_result_t res{ .res = -s_last_error() };
-				server_ctx_.evConn(res, nullptr, addr_pair_t{.local = addr_});
+				server_ctx_.evConn(res, nullptr, addr_pair_);
 				return false;
 			}
 
@@ -115,7 +114,7 @@ namespace shu {
 				return false;
 			}
 			acceptor->sock_ = std::make_unique<ssocket>();
-			acceptor->sock_->init(false, sock_addr_.ss_family == AF_INET6);
+			acceptor->sock_->init(false, aftype_ == AF_INET6);
 
 			auto* client_sock = navite_cast_ssocket(acceptor->sock_.get());
 			auto* server_sock = navite_cast_ssocket(sock_.get());
@@ -131,7 +130,7 @@ namespace shu {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
 					socket_io_result_t res{ .res = -s_last_error() };
-					server_ctx_.evConn(res, nullptr, addr_pair_t{.local = addr_});
+					server_ctx_.evConn(res, nullptr, addr_pair_);
 					return false;
 				}
 			}
@@ -227,6 +226,11 @@ namespace shu {
 	auto sacceptor::loop() -> sloop* {
 		shu::panic(s_);
 		return s_->loop_;
+	}
+
+	auto sacceptor::addr() -> const addr_storage_t& {
+		shu::panic(s_);
+		return s_->addr_pair_.local;
 	}
 
 	void sacceptor::stop()

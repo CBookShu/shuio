@@ -1,5 +1,11 @@
 add_rules("mode.debug", "mode.release")
 
+-- 1. cmake add option to disable warning in vs
+-- target_compile_options(shuio PUBLIC /wd4819)
+
+-- 2. xmake project -k cmake
+-- create cmakelist.txt; cmake 插件比 xmake 好用很多
+
 set_languages("c++20")
 
 target("shuio")
@@ -19,6 +25,16 @@ target("example")
     set_kind("binary")
     add_deps("shuio")
     add_files("example/sio.cpp")
+
+target("pingpong_server")
+    set_kind("binary")
+    add_deps("shuio")
+    add_files("example/pingpong/server.cpp")
+
+target("pingpong_client")
+    set_kind("binary")
+    add_deps("shuio")
+    add_files("example/pingpong/client.cpp")
 --
 -- If you want to known more usage about xmake, please see https://xmake.io
 --

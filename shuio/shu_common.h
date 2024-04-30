@@ -31,6 +31,12 @@ namespace shu {
 		}
 	};
 
+	template <typename T>
+	using UPtr = std::unique_ptr<T>;
+
+	template <typename T>
+	using SPtr = std::shared_ptr<T>;
+
 	struct addr_pair_t {
 		addr_storage_t remote;
 		addr_storage_t local;
