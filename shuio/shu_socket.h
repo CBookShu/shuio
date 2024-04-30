@@ -41,6 +41,7 @@ namespace shu {
 		int noblock(bool);
 		int reuse_addr(bool);
 		int reuse_port(bool);	// win32 应该是不支持的
+		int keepalive(bool enable,int delay);
 		int nodelay(bool);
 		int bind(void*, std::size_t);
 		int listen();

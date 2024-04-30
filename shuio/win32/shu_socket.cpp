@@ -73,6 +73,33 @@ namespace shu {
 			return -s_last_error();
 		}
 
+		int keepalive(bool enable,int delay) {
+			if (setsockopt(s,
+						SOL_SOCKET,
+						SO_KEEPALIVE,
+						(const char*)&enable,
+						sizeof enable) == -1) {
+				return -s_last_error();
+			}
+
+			if(!enable) {
+				return 1;
+			}
+
+			if(delay < 1) {
+				return -1;
+			}
+
+			if (setsockopt(s,
+						IPPROTO_TCP,
+						TCP_KEEPALIVE,
+						(const char*)&delay,
+						sizeof delay) == -1) {
+				return -s_last_error();
+			}
+			return 1;
+		}
+
 		int nodelay(bool flag)
 		{
 			if (opt_.flags.nodelay == flag) {
@@ -174,6 +201,10 @@ namespace shu {
 	int ssocket::reuse_port(bool)
 	{
 		return 0;
+	}
+
+	int ssocket::keepalive(bool enable,int delay) {
+		return ss_->keepalive(enable, delay);
 	}
 
 	int ssocket::nodelay(bool flag)
