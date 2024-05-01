@@ -28,7 +28,7 @@ namespace shu {
 			if (v6) {
 				family = AF_INET6;
 			}
-			s = ::WSASocket(AF_INET, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
+			s = ::WSASocket(family, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
 			shu::panic(s != INVALID_SOCKET);
 
 			bool non_ifs_lsp;
