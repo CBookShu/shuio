@@ -18,10 +18,15 @@ namespace shu {
 			acceptor_complete_t()
 			: doing_(false)
 			{
-				std::memset(static_cast<OVERLAPPED*>(this), 0, sizeof(OVERLAPPED));
+				shu::zero_mem(static_cast<OVERLAPPED&>(*this));
+				shu::zero_mem(buffer_);
 			}
 		};
 		
+		enum {
+			max_acceptor_post = 32
+		};
+
 		sloop* loop_;
 		sacceptor* owner_;
 		std::unique_ptr<ssocket> sock_;
@@ -30,10 +35,11 @@ namespace shu {
 		sacceptor::event_ctx server_ctx_;
 		std::vector<acceptor_complete_t> accept_ops;
 		bool stop_;
+		bool close_;
 
 		sacceptor_t(sloop* loop, sacceptor* owner, event_ctx&& server_ctx, addr_storage_t addr)
 		: loop_(loop), owner_(owner), addr_pair_{.local = addr},aftype_(AF_UNSPEC),
-		server_ctx_(std::forward<event_ctx>(server_ctx)), stop_(false)
+		server_ctx_(std::forward<event_ctx>(server_ctx)), stop_(false),close_(false)
 		{
 			shu::panic(!!server_ctx_.evConn);
 		}
@@ -42,6 +48,9 @@ namespace shu {
 		}
 
 		void post_close() {
+			if (std::exchange(close_, true)) {
+				return;
+			}
 			if (server_ctx_.evClose) {
 				loop_->post([cb = std::move(server_ctx_.evClose), owner = owner_](){
 					cb(owner);
@@ -98,7 +107,7 @@ namespace shu {
 				run(entry);
 			});
 
-			accept_ops.resize(4);
+			accept_ops.resize(max_acceptor_post);
 			int doing_count = 0;
 			for (auto& op:accept_ops) {
 				last_erro = post_acceptor(&op);
@@ -156,12 +165,18 @@ namespace shu {
 			
 			addr_pair_t addr{};
 			addr.remote.port = ntohs(ClientAddr->sin_port);
-			inet_ntop(AF_INET, &ClientAddr->sin_addr, addr.remote.ip.data(), addr.remote.ip.size());
+			inet_ntop(ClientAddr->sin_family, &ClientAddr->sin_addr, addr.remote.ip.data(), addr.remote.ip.size());
 
 			addr.local.port = ntohs(LocalAddr->sin_port);
-			inet_ntop(AF_INET, &LocalAddr->sin_addr, addr.local.ip.data(), addr.local.ip.size());
+			inet_ntop(LocalAddr->sin_family, &LocalAddr->sin_addr, addr.local.ip.data(), addr.local.ip.size());
 
 			socket_io_result_t res{ .res = 1 };
+			if(addr.local.port != addr_pair_.local.port) {
+				// err
+				res.res = -s_last_error();
+				op->sock_.reset();
+			}
+
 			server_ctx_.evConn(res, op->sock_.release(), addr);
 
 			if (stop_) {
@@ -190,6 +205,7 @@ namespace shu {
 			for (auto& op : accept_ops) {
 				if(op.doing_) {
 					::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &op);
+					op.sock_.reset();
 					cancel = true;
 				}
 			}

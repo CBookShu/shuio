@@ -95,14 +95,14 @@ namespace shu {
 	// common user end
 
 	template <typename T>
-	requires(std::is_trivial_v<T>)
-	void zero_mem(T* t) {
-		std::memset(t, 0, sizeof(T));
-	}
-
-	template <typename T>
-	requires(std::is_trivial_v<T>)
+		requires(std::is_trivial_v<T>)
 	void zero_mem(T& t) {
 		std::memset(&t, 0, sizeof(T));
+	}
+
+	template <typename T, std::size_t N>
+		requires(std::is_trivial_v<T>)
+	void zero_mem(T(&t)[N]) {
+		std::memset(t, 0, sizeof(T) * N);
 	}
 };

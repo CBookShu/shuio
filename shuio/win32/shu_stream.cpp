@@ -19,7 +19,7 @@ namespace shu {
 			: func(func_),running(false){}
 
 			void zero_op() {
-				shu::zero_mem(static_cast<OVERLAPPED*>(this));
+				shu::zero_mem(static_cast<OVERLAPPED&>(*this));
 			}
 			void set(func_on_write_t&& cb) {
 				on_write_cb = std::forward<func_on_write_t>(cb);
@@ -36,7 +36,7 @@ namespace shu {
 			: func(func_),running(false){}
 
 			void zero_op() {
-				shu::zero_mem(static_cast<OVERLAPPED*>(this));
+				shu::zero_mem(static_cast<OVERLAPPED&>(*this));
 			}
 			void set(func_on_read_t&& cb, func_alloc_t&& alloc) {
 				on_read_cb = std::forward<func_on_read_t>(cb);

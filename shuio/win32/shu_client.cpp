@@ -18,16 +18,20 @@ namespace shu {
         addr_pair_t addr_pair_;
         OVERLAPPED connector_;
         bool stopping_;
+        bool close_;
 
         sclient_t(sloop* loop, sclient* owner, sclient_ctx&& callback, addr_storage_t addr)
         : loop_(loop),owner_(owner), cb_ctx_(std::forward<sclient_ctx>(callback)),
-        addr_pair_{.remote = addr},stopping_(false)
+        addr_pair_{.remote = addr},stopping_(false),close_(false)
         {
             connector_ = {};
             shu::panic(!!cb_ctx_.evConn);
         }
 
         void post_to_close() {
+            if (std::exchange(close_, true)) {
+                return;
+            }
             if (cb_ctx_.evClose) {
                 loop_->post([f = std::move(cb_ctx_.evClose), owner = owner_](){
                     f(owner);
@@ -149,10 +153,9 @@ namespace shu {
                 // 需要关闭调用
                 auto* navite_sock = navite_cast_ssocket(sock_.get());
                 ::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &connector_);
-            } else {
-                // 要么是start 报错，要么是已经完成了
-                post_to_close();
+                sock_->close();
             }
+            post_to_close();
         }
     };
 
