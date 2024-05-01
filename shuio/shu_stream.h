@@ -21,7 +21,7 @@ namespace shu {
 	public:
 		using func_on_read_t = std::function<void(socket_io_result_t, buffers_t)>;
 		using func_on_write_t = std::function<void(socket_io_result_t)>;
-		using func_alloc_t = std::function<buffer_t(int)>;
+		using func_alloc_t = std::function<void(int, buffer_t&)>;
 		using func_close_t = std::function<void(sstream*)>;
 
 		struct stream_ctx_t {

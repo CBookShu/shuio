@@ -56,12 +56,13 @@ namespace shu {
 		std::any ud_;
 
 		bool stop_;
+		bool close_;
 		sstream_t(sloop* loop, sstream* owner,ssocket* sock, sstream_opt opt, sstream::stream_ctx_t&& stream_event)
 			: loop_(loop), owner_(owner),
 			sock_(sock),opt_(opt),
 			reader_(run_read),writer_(run_write),
 			stream_ctx_(std::forward<sstream::stream_ctx_t>(stream_event)) ,
-			stop_(false)
+			stop_(false),close_(false)
 		{
 		}
 		~sstream_t() {
@@ -69,6 +70,9 @@ namespace shu {
 		}
 
 		void post_to_close() {
+			if (std::exchange(close_, true)) {
+				return;
+			}
 			if (stream_ctx_.evClose) {
 				loop_->post([cb = std::move(stream_ctx_.evClose), owner = owner_](){
 					cb(owner);
@@ -150,6 +154,13 @@ namespace shu {
 			} else {
 				socket_io_result_t res{ .res = static_cast<int>(dwBytes)};
 				std::forward<func_on_write_t>(cb)(res);
+
+				// 现在的write 在一定情况下，会直接成功，可能会漏掉stop 的机会
+				if (stop_
+				&& !reader_.running 
+				&& !writer_.running ) {
+					post_to_close();
+				}
 				return true;
 			}
 			writer_.set(std::forward<func_on_write_t>(cb));
@@ -163,7 +174,8 @@ namespace shu {
 			
 			char buffer_stack[65535];
 			buffer_t buf[2];
-			buf[0] = self->reader_.on_alloc_cb(65535);
+			shu::zero_mem(buf[0]);
+			self->reader_.on_alloc_cb(65535, buf[0]);
 			buf[1].p = buffer_stack;
 			buf[1].size = sizeof(buffer_stack);
 
@@ -220,14 +232,21 @@ namespace shu {
 
 			if(writer_.running) {
 				// wait writing
+				sock_->shutdown(shutdown_type::shutdown_write);
 				return;
 			}
 			auto* navite_sock = navite_cast_ssocket(sock_.get());
-			sock_->shutdown(shutdown_type::shutdown_write);
 			if(!reader_.running) {
 				post_to_close();
 			} else {
-				// TODO?: ::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
+				// 有时候它并不起作用。。。
+				::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &reader_);
+
+				// 上面不起作用没关系，这里close 一定让它不能继续操作了
+				sock_->close();
+
+				// 下一帧强制释放自己
+				post_to_close();
 			}
 		}
 	};

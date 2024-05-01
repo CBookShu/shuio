@@ -56,12 +56,10 @@ public:
         p->read([this, p](socket_io_result res, buffers_t bufs){
             on_read(p, res, bufs);
         },
-        [this, p](int size){
+        [this, p](int size, buffer_t& buf){
             auto* rwbuf = shu::get_user_data<stream_with_buf>(*p);
-            buffer_t buf;
             buf.p = rwbuf->rd_buf.value().data();
             buf.size = rwbuf->rd_buf.value().size();
-            return buf;
         });
     }
     

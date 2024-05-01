@@ -153,12 +153,9 @@ namespace shu {
         // 自定义函数队列
         std::mutex mutex_;
         std::vector< func_t> tasks_;
+        std::atomic_uint32_t taskcount_;
 
         std::any ud_;
-
-        // 增加task running 标志，减轻post的负载
-        bool wake_up_{ false };
-        bool task_running_{ false };
 
         sloop_t() {
             iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
@@ -197,15 +194,14 @@ namespace shu {
                     overlappeds.data(),
                     overlappeds.size(),
                     &count,
-                    INFINITE,
+                    taskcount_ > 0 ? 0 : INFINITE,
                     false);
                 if (!r) {
                     // timeout?
                     int e = WSAGetLastError();
-                    continue;
+                    shu::panic(WSA_WAIT_TIMEOUT == e, 
+                        std::string("GetQueuedCompletionStatusEx Error:") + std::to_string(e));
                 }
-
-                wake_up_ = true;
 
                 bool hasstop = false;
                 bool hastimer = false;
@@ -235,7 +231,6 @@ namespace shu {
                     on_timer();
                 }
 
-                wake_up_ = false;
                 // 要退出了，其实还需要清理一些内容才对
                 if (hasstop) {
                     // iocp_的生命周期，仅在run函数中
@@ -262,9 +257,8 @@ namespace shu {
                 tasks_.emplace_back(std::forward<func_t>(cb));
             }
 
-            if (run_tid_ != std::this_thread::get_id()
-                || !wake_up_
-                || task_running_) {
+            taskcount_++;
+            if (run_tid_ != std::this_thread::get_id()) {
                 // 应该永远不应该失败,哪怕失败了，也无所谓，tasks_ 会负责回收 cb
                 BOOL res = ::PostQueuedCompletionStatus(iocp, 0, reinterpret_cast<ULONG_PTR>(&tag_wake), nullptr);
             }
@@ -309,7 +303,6 @@ namespace shu {
         }
 
         void on_tasks() {
-            task_running_ = true;
             std::vector<func_t> pendings;
             {
                 std::lock_guard<std::mutex> guard(mutex_);
@@ -318,14 +311,13 @@ namespace shu {
             for (auto& it : pendings) {
                 it();
             }
-            task_running_ = false;
+            taskcount_-= pendings.size();
         }
 
         void on_start() {
             timers_.start_timer([&] {
                 ::PostQueuedCompletionStatus(iocp, 0, reinterpret_cast<ULONG_PTR>(&tag_timer), nullptr);
             });
-            wake_up_ = false;
         }
 
         void on_stop() {
