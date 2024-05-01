@@ -45,47 +45,47 @@ public:
         stream_ptr->start(&loop_, ptr.release(), {.addr = addr}, {
             .evClose = [](sstream* s){
                 delete s;
-            },
+            }
         });
         auto* rwbuf = shu::set_user_data<stream_with_buf>(*stream_ptr);
         rwbuf->rd_buf.emplace(&pool_);
         rwbuf->wt_buf.emplace(&pool_);
         rwbuf->rd_buf.value().resize(4096);
         
-        buffer_t buf;
-        buf.p = rwbuf->rd_buf.value().data();
-        buf.size = rwbuf->rd_buf.value().size();
-
         auto p = stream_ptr.release();
-        p->read(buf, [this, p, buf](socket_io_result_t res) mutable {
-            on_read(p, res, buf);
+        p->read([this, p](socket_io_result res, buffers_t bufs){
+            on_read(p, res, bufs);
+        },
+        [this, p](int size){
+            auto* rwbuf = shu::get_user_data<stream_with_buf>(*p);
+            buffer_t buf;
+            buf.p = rwbuf->rd_buf.value().data();
+            buf.size = rwbuf->rd_buf.value().size();
+            return buf;
         });
     }
     
-    void on_read(sstream* s, socket_io_result_t res, buffer_t buf) {
+    void on_read(sstream* s, socket_io_result_t res, buffers_t buf) {
         if (res.res <= 0) {
             s->stop();
             return;
         }
 
         auto* rwbuf = shu::get_user_data<stream_with_buf>(*s);
-        rwbuf->wt_buf.value().assign(buf.p, buf.p + res.res);
+        rwbuf->wt_buf.value().assign(buf[0].p, buf[0].p + buf[0].size);
+        rwbuf->wt_buf.value().insert(
+            rwbuf->wt_buf.value().end(),
+            buf[1].p, buf[1].p + buf[1].size
+        );
         buffer_t wbuf;
         wbuf.p = rwbuf->wt_buf.value().data();
         wbuf.size = res.res;
-        s->write(wbuf, [this,s,wbuf](socket_io_result_t res) mutable {
-            on_write(s,res,wbuf);
-        });
-
-        buffer_t rbuf;
-        rbuf.p = rwbuf->rd_buf.value().data();
-        rbuf.size = rwbuf->rd_buf.value().size();
-        s->read(rbuf, [this,s,rbuf](socket_io_result_t res) mutable {
-            on_read(s, res, rbuf);
+        s->write(wbuf, [this,s](socket_io_result_t res) mutable {
+            on_write(s,res);
         });
     }
 
-    void on_write(sstream* s, socket_io_result_t res, buffer_t buf) {
+    void on_write(sstream* s, socket_io_result_t res) {
 
     }
 private:
