@@ -29,6 +29,8 @@ namespace shu {
 		sloop(sloop&& other) noexcept;
 		~sloop();
 
+		auto get_ud() -> std::any*;
+
 		auto handle() -> sloop_t*;
 
 		void post(func_t&& f);

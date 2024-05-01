@@ -49,7 +49,7 @@ namespace shu {
 			}
 		}
 
-		bool start() {
+		int start() {
 			// 先创建 sock和对应的bind和listen
 			addrinfo hints { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
             addrinfo *server_info {nullptr};
@@ -59,7 +59,7 @@ namespace shu {
             if(rv != 0) {
 				socket_io_result_t res{ .res = -s_last_error() };
 				server_ctx_.evConn(res, nullptr, addr_pair_);
-				return false;
+				return res.res;
             }
             auto f_deleter = [](addrinfo* p){ freeaddrinfo(p);};
             std::unique_ptr<addrinfo, void(*)(addrinfo*)> ptr(server_info, f_deleter);
@@ -84,9 +84,9 @@ namespace shu {
             }
 
 			if(!sock_) {
-				socket_io_result_t res{ .res = -s_last_error() };
+				socket_io_result_t res{ .res = -last_erro };
 				server_ctx_.evConn(res, nullptr, addr_pair_);
-				return false;
+				return res.res;
 			}
 
 			sock_->reuse_addr(true);
@@ -101,17 +101,18 @@ namespace shu {
 			accept_ops.resize(4);
 			int doing_count = 0;
 			for (auto& op:accept_ops) {
-				if (post_acceptor(&op)) {
-					doing_count++;
+				last_erro = post_acceptor(&op);
+				if (last_erro <= 0) {
+					break;
 				}
 			}
 
-			return doing_count > 0;
+			return last_erro;
 		}
 
-		bool post_acceptor(acceptor_complete_t* acceptor) {
+		int post_acceptor(acceptor_complete_t* acceptor) {
 			if(stop_) {
-				return false;
+				return 0;
 			}
 			acceptor->sock_ = std::make_unique<ssocket>();
 			acceptor->sock_->init(false, aftype_ == AF_INET6);
@@ -129,13 +130,13 @@ namespace shu {
 			if (!r) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
-					socket_io_result_t res{ .res = -s_last_error() };
+					socket_io_result_t res{ .res = -e };
 					server_ctx_.evConn(res, nullptr, addr_pair_);
-					return false;
+					return res.res;
 				}
 			}
 			acceptor->doing_ = true;
-			return true;
+			return 1;
 		}
 
 		void run(OVERLAPPED_ENTRY* entry) {
@@ -174,7 +175,7 @@ namespace shu {
 					post_close();
 				}
 			}
-			else if(!post_acceptor(op)) {
+			else if(post_acceptor(op) <= 0) {
 				// post_acceptor err will call callback
 			}
 		}
@@ -214,12 +215,11 @@ namespace shu {
 		}
 	}
 
-	bool sacceptor::start(sloop* loop, event_ctx&& ctx,addr_storage_t addr)
+	int sacceptor::start(sloop* loop, event_ctx&& ctx,addr_storage_t addr)
 	{
 		shu::panic(!s_);
-		auto ptr = std::make_unique<sacceptor_t>(loop, this, std::forward<event_ctx>(ctx), addr);
-		auto r = ptr->start();
-		s_ = ptr.release();
+		s_ = new sacceptor_t(loop, this, std::forward<event_ctx>(ctx), addr);
+		auto r = s_->start();
 		return r;
 	}
 

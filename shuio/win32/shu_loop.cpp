@@ -154,6 +154,8 @@ namespace shu {
         std::mutex mutex_;
         std::vector< func_t> tasks_;
 
+        std::any ud_;
+
         // 增加task running 标志，减轻post的负载
         bool wake_up_{ false };
         bool task_running_{ false };
@@ -359,6 +361,11 @@ namespace shu {
     {
         if (!loop_) return;
         delete loop_;
+    }
+
+    auto sloop::get_ud() -> std::any* {
+        shu::panic(loop_);
+        return &loop_->ud_;
     }
 
     auto sloop::handle() -> sloop_t*

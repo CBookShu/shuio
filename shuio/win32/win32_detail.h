@@ -53,7 +53,7 @@ namespace shu {
 	auto navite_attach_iocp(sloop*, ssocket*) -> bool;
 
 	template <typename F>
-	void navite_sock_setcallbak(ssocket* s, F&& f) {
+	inline void navite_sock_setcallbak(ssocket* s, F&& f) {
 		fd_navite_t* sock = navite_cast_ssocket(s);
 		std::get_if<iocp_socket_t>(&sock->tag)->cb = std::forward<F>(f);
 	}

@@ -15,13 +15,13 @@ namespace shu {
         sclient* owner_;
         std::unique_ptr<ssocket> sock_;
         sclient_ctx cb_ctx_;
-        addr_storage_t remote_addr_;
+        addr_pair_t addr_pair_;
         OVERLAPPED connector_;
         bool stopping_;
 
         sclient_t(sloop* loop, sclient* owner, sclient_ctx&& callback, addr_storage_t addr)
         : loop_(loop),owner_(owner), cb_ctx_(std::forward<sclient_ctx>(callback)),
-        remote_addr_(addr),stopping_(false)
+        addr_pair_{.remote = addr},stopping_(false)
         {
             connector_ = {};
             shu::panic(!!cb_ctx_.evConn);
@@ -35,17 +35,17 @@ namespace shu {
             }
         }
 
-        bool start() {
+        int start() {
             addrinfo hints { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
             addrinfo *server_info {nullptr};
-            auto service = std::to_string(remote_addr_.port);
-            std::string_view ip(remote_addr_.ip.data());
+            auto service = std::to_string(addr_pair_.remote.port);
+            std::string_view ip(addr_pair_.remote.ip.data());
 
             int rv = getaddrinfo(ip.data(), service.c_str(), &hints, &server_info);
             if(rv != 0) {
                 socket_io_result res{ .res = -s_last_error() };
-                cb_ctx_.evConn(res, nullptr, addr_pair_t{ .remote = remote_addr_, .local = {} });
-                return false;
+                cb_ctx_.evConn(res, nullptr, addr_pair_);
+                return res.res;
             }
             auto f_deleter = [](addrinfo* p){ freeaddrinfo(p);};
             std::unique_ptr<addrinfo, void(*)(addrinfo*)> ptr(server_info, f_deleter);
@@ -60,8 +60,8 @@ namespace shu {
                 auto* navite_sock = navite_cast_ssocket(ptr_sock.get());
 
                 navite_attach_iocp(loop_, ptr_sock.get());
-                // this Ò»¶¨Òª±Èconnector_ »îµÃ¾Ã
-                // ²»°Ñhold ·ÅÔÚlambdaÖĞ£¬ÒòÎªsock_°ó¶¨µÄÕâ¸öLambdaÉúÃüÖÜÆÚÌ«¾ÃÁË
+                // this ä¸€å®šè¦æ¯”connector_ æ´»å¾—ä¹…
+                // ä¸æŠŠhold æ”¾åœ¨lambdaä¸­ï¼Œå› ä¸ºsock_ç»‘å®šçš„è¿™ä¸ªLambdaç”Ÿå‘½å‘¨æœŸå¤ªä¹…äº†
                 navite_sock_setcallbak(ptr_sock.get(), [this](OVERLAPPED_ENTRY* entry) {
                     run(entry);
                 });
@@ -79,8 +79,8 @@ namespace shu {
 
             if(!sock_) {
                 socket_io_result res{ .res = -last_error };
-                cb_ctx_.evConn(res, nullptr, addr_pair_t{ .remote = remote_addr_, .local = {} });
-                return false;
+                cb_ctx_.evConn(res, nullptr, addr_pair_);
+                return res.res;
             }
             auto* navite_sock = navite_cast_ssocket(sock_.get());
             DWORD dwBytes = 0;
@@ -89,8 +89,8 @@ namespace shu {
                 auto err = s_last_error();
                 if (err != ERROR_IO_PENDING) {
                     socket_io_result res{ .res = -err };
-                    cb_ctx_.evConn(res, nullptr, addr_pair_t{ .remote = remote_addr_, .local = {} });
-                    return false;
+                    cb_ctx_.evConn(res, nullptr, addr_pair_);
+                    return res.res;
                 }
             }
             return true;
@@ -98,21 +98,20 @@ namespace shu {
 
         void run(OVERLAPPED_ENTRY* entry) {
             if (entry->dwNumberOfBytesTransferred != 0) {
-                // É¾³ıÒÑ¾­´´½¨µÄsock£¬Ö¤Ã÷µ÷ÓÃÒÑ¾­Íê³ÉÁË
+                // åˆ é™¤å·²ç»åˆ›å»ºçš„sockï¼Œè¯æ˜è°ƒç”¨å·²ç»å®Œæˆäº†
                 sock_.reset();
                 socket_io_result res{ .res = -s_last_error() };
-                cb_ctx_.evConn(res, nullptr, addr_pair_t{ .remote = remote_addr_, .local = {} });
+                cb_ctx_.evConn(res, nullptr, addr_pair_);
             }
             else {
                 socket_io_result res{ .res = 1 };
                 auto* navite_sock = navite_cast_ssocket(sock_.get());
-                addr_pair_t addr_pair{ .remote = remote_addr_};
                 struct sockaddr_in addr;
                 int len = sizeof(addr);
                 if (0 == getsockname(navite_sock->s, (struct sockaddr*)&addr, &len)) {
-                    sockaddr_2_storage(&addr, &addr_pair.local);
+                    sockaddr_2_storage(&addr, &addr_pair_.local);
                 }
-                cb_ctx_.evConn(res, sock_.release(), addr_pair);
+                cb_ctx_.evConn(res, sock_.release(), addr_pair_);
             }
 
             if(stopping_) {
@@ -126,11 +125,11 @@ namespace shu {
             }
 
             if(sock_) {
-                // ĞèÒª¹Ø±Õµ÷ÓÃ
+                // éœ€è¦å…³é—­è°ƒç”¨
                 auto* navite_sock = navite_cast_ssocket(sock_.get());
                 ::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &connector_);
             } else {
-                // ÒªÃ´ÊÇstart ±¨´í£¬ÒªÃ´ÊÇÒÑ¾­Íê³ÉÁË
+                // è¦ä¹ˆæ˜¯start æŠ¥é”™ï¼Œè¦ä¹ˆæ˜¯å·²ç»å®Œæˆäº†
                 post_to_close();
             }
         }
@@ -148,13 +147,13 @@ namespace shu {
             delete s_;
         }
     }
-    bool sclient::start(sloop* loop, addr_storage_t saddr, sclient_ctx&& ctx)
+    int sclient::start(sloop* loop, addr_storage_t saddr, sclient_ctx&& ctx)
     {
         shu::panic(!s_);
 
-        auto sptr = std::make_unique<sclient_t>(loop, this, std::forward<sclient_ctx>(ctx), saddr);
-        s_ = sptr.release();
-        return s_->start();
+        s_ = new sclient_t(loop, this, std::forward<sclient_ctx>(ctx), saddr);
+        int r = s_->start();
+        return r;
     }
 
     auto sclient::loop() -> sloop* {
