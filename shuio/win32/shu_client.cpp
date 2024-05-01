@@ -50,41 +50,67 @@ namespace shu {
             auto f_deleter = [](addrinfo* p){ freeaddrinfo(p);};
             std::unique_ptr<addrinfo, void(*)(addrinfo*)> ptr(server_info, f_deleter);
             int last_error = 0;
-            sockaddr_storage addr;
-            int len = sizeof(addr);
+            sockaddr_storage addr_remote;
+            shu::zero_mem(addr_remote);
+            int len = sizeof(addr_remote);
             for (auto p = server_info; p != nullptr; p = p->ai_next) {
-                std::unique_ptr<ssocket> ptr_sock = std::make_unique<ssocket>();
-                ptr_sock->init(p->ai_socktype == SOCK_DGRAM, p->ai_family ==AF_INET6);
-                ptr_sock->noblock(true);
-
-                auto* navite_sock = navite_cast_ssocket(ptr_sock.get());
-
-                navite_attach_iocp(loop_, ptr_sock.get());
-                // this 一定要比connector_ 活得久
-                // 不把hold 放在lambda中，因为sock_绑定的这个Lambda生命周期太久了
-                navite_sock_setcallbak(ptr_sock.get(), [this](OVERLAPPED_ENTRY* entry) {
-                    run(entry);
-                });
-
-                if (!ptr_sock->bind(p->ai_addr, p->ai_addrlen)) {
-                    last_error = s_last_error();
-                    continue;
-                }
-
                 shu::panic(len >= p->ai_addrlen);
-                std::memcpy(&addr, p->ai_addr, p->ai_addrlen);
-                sock_.swap(ptr_sock);
+                std::memcpy(&addr_remote, p->ai_addr, p->ai_addrlen);
+                len = p->ai_addrlen;
+
+                addr_pair_.remote.family = p->ai_family;
                 break;
             }
 
-            if(!sock_) {
-                socket_io_result res{ .res = -last_error };
+            sock_ = std::make_unique<ssocket>();
+            sock_->init(false, addr_pair_.remote.family ==AF_INET6);
+            sock_->noblock(true);
+
+            auto* navite_sock = navite_cast_ssocket(sock_.get());
+
+            addr_storage_t addr_bind;
+            addr_bind.family = addr_remote.ss_family;
+            addr_bind.port = 0;
+            if (addr_remote.ss_family == AF_INET) {
+                sockaddr_in addr4;
+                shu::storage_2_sockaddr(&addr_bind, &addr4); 
+                if (!sock_->bind(&addr4, sizeof(addr4))) {
+                    socket_io_result res{ .res = -s_last_error() };
+                    cb_ctx_.evConn(res, nullptr, addr_pair_);
+                    return res.res;
+                }
+                int len = sizeof(addr4);
+                if(0 == ::getsockname(navite_sock->s, (struct sockaddr*)&addr4, &len)) {
+                    shu::sockaddr_2_storage(&addr4, &addr_pair_.local);
+                }
+            } else if (addr_remote.ss_family == AF_INET6) {
+                sockaddr_in6 addr6;
+                shu::storage_2_sockaddr(&addr_bind, &addr6); 
+                if (!sock_->bind(&addr6, sizeof(addr6))) {
+                    socket_io_result res{ .res = -s_last_error() };
+                    cb_ctx_.evConn(res, nullptr, addr_pair_);
+                    return res.res;
+                }
+                int len = sizeof(addr6);
+                if(0 == ::getsockname(navite_sock->s, (struct sockaddr*)&addr6, &len)) {
+                    shu::sockaddr_2_storage(&addr6, &addr_pair_.local);
+                }
+            } else {
+                // panic ?
+                socket_io_result res{ .res = -1 };
                 cb_ctx_.evConn(res, nullptr, addr_pair_);
                 return res.res;
             }
-            auto* navite_sock = navite_cast_ssocket(sock_.get());
+
+            navite_attach_iocp(loop_, sock_.get());
+            // this 一定要比connector_ 活得久
+            // 不把hold 放在lambda中，因为sock_绑定的这个Lambda生命周期太久了
+            navite_sock_setcallbak(sock_.get(), [this](OVERLAPPED_ENTRY* entry) {
+                run(entry);
+            });
             DWORD dwBytes = 0;
-            BOOL r = win32_extension_fns::ConnectEx(navite_sock->s, (struct sockaddr*)&addr, len, nullptr, 0, &dwBytes, &connector_);
+            struct sockaddr* p = (struct sockaddr*)&addr_remote;
+            BOOL r = win32_extension_fns::ConnectEx(navite_sock->s, p, len, nullptr, 0, &dwBytes, &connector_);
             if (!r) {
                 auto err = s_last_error();
                 if (err != ERROR_IO_PENDING) {
@@ -106,11 +132,6 @@ namespace shu {
             else {
                 socket_io_result res{ .res = 1 };
                 auto* navite_sock = navite_cast_ssocket(sock_.get());
-                struct sockaddr_in addr;
-                int len = sizeof(addr);
-                if (0 == getsockname(navite_sock->s, (struct sockaddr*)&addr, &len)) {
-                    sockaddr_2_storage(&addr, &addr_pair_.local);
-                }
                 cb_ctx_.evConn(res, sock_.release(), addr_pair_);
             }
 

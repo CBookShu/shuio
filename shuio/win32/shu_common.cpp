@@ -38,15 +38,35 @@ namespace shu {
 	}
 
 	void sockaddr_2_storage(void* p, addr_storage_t* storage) {
-		auto* addr = static_cast<struct sockaddr_in*>(p);
-		storage->port = ntohl(addr->sin_port);
-		std::string_view sip(storage->ip.data());
-		::inet_ntop(AF_INET, addr, const_cast<char*>(sip.data()), sip.size());
+		auto* addr_common = static_cast<sockaddr_storage*>(p);
+		if (addr_common->ss_family == AF_INET) {
+			auto* addr = static_cast<struct sockaddr_in*>(p);
+			storage->port = ntohs(addr->sin_port);
+			std::string_view sip(storage->ip.data());
+			::inet_ntop(storage->family, addr, storage->ip.data(), storage->ip.size());
+		} else if (addr_common->ss_family == AF_INET6) {
+			auto* addr = static_cast<struct sockaddr_in6*>(p);
+			storage->port = ntohs(addr->sin6_port);
+			std::string_view sip(storage->ip.data());
+			::inet_ntop(storage->family, addr, storage->ip.data(), storage->ip.size());
+		} else {
+			shu::panic(false, std::string("error family:") + std::to_string(addr_common->ss_family));
+		}
 	}
+
 	bool storage_2_sockaddr(addr_storage_t* storage, void* p) {
-		auto* addr = static_cast<struct sockaddr_in*>(p);
-		addr->sin_family = AF_INET;
-		addr->sin_port =  htons(storage->port);
-		return ::inet_pton(AF_INET, storage->ip.data(), &(addr->sin_addr)) == 1;
+		if(storage->family == AF_INET) {
+			auto* addr = static_cast<struct sockaddr_in*>(p);
+			addr->sin_family = storage->family;
+			addr->sin_port =  htons(storage->port);
+			return ::inet_pton(storage->family, storage->ip.data(), &(addr->sin_addr)) == 1;
+		} else if (storage->family == AF_INET6) {
+			auto* addr = static_cast<struct sockaddr_in6*>(p);
+			addr->sin6_family = storage->family;
+			addr->sin6_port =  htons(storage->port);
+			return ::inet_pton(storage->family, storage->ip.data(), &(addr->sin6_addr)) == 1;
+		} else {
+			shu::panic(false, std::string("error family:") + std::to_string(storage->family));
+		}
 	}
 }

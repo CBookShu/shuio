@@ -17,14 +17,18 @@ namespace shu {
 	T& operator = (T&) = delete;\
 
 	struct addr_storage_t {
-		int port;
+		std::uint16_t port;
+		std::uint16_t family;
 		std::array<char,64> ip;
-		addr_storage_t(int port_, std::string_view ip_ = "0.0.0.0"):port(port_) {
+		// family_ = 2 默认是 IPV4, AF_INET
+		addr_storage_t(int port_, std::string_view ip_ = "0.0.0.0", int family_ = 2)
+		:port(port_), family(family_)
+		{
 			// TODO: assert(ip_.size() < ip.size());
 			std::copy(ip_.begin(), ip_.end(), ip.begin());
 			ip[ip_.size()] = 0;
 		}
-		addr_storage_t():port(0) {
+		addr_storage_t():port(0),family(0) {
 			std::string_view ip_ = "0.0.0.0";
 			std::copy(ip_.begin(), ip_.end(), ip.begin());
 			ip[ip_.size()] = 0;
