@@ -318,6 +318,7 @@ namespace shu {
             timers_.start_timer([&] {
                 ::PostQueuedCompletionStatus(iocp, 0, reinterpret_cast<ULONG_PTR>(&tag_timer), nullptr);
             });
+            taskcount_ = 0;
         }
 
         void on_stop() {
@@ -332,6 +333,8 @@ namespace shu {
             for (auto& it : pendings) {
                 it();
             }
+            taskcount_ -= pendings.size();
+            shu::panic(taskcount_ == 0);
         }
 
         void check_thread(std::source_location call) {
