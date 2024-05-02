@@ -103,7 +103,7 @@ namespace shu {
                     addr_pair_.remote = {};
                 }
             } else {
-                res.res = -s_last_error();
+                res.res = cqe->res;
             }
 
             cb_ctx_.evConn(owner_, res, sock.release(), addr_pair_);
