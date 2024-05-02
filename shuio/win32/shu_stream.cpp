@@ -97,14 +97,14 @@ namespace shu {
 			int err = sock_->noblock(true);
 			if (err <= 0) {
 				socket_io_result res{err};	
-				reader_.on_read_cb(res, buffers_t{});
+				reader_.on_read_cb(owner_, res, buffers_t{});
 				return err;
 			}
 
 			err = sock_->nodelay(true);
 			if (err <= 0) {
 				socket_io_result res{err};	
-				reader_.on_read_cb(res, buffers_t{});
+				reader_.on_read_cb(owner_, res, buffers_t{});
 				return err;
 			}
 			return post_read();
@@ -126,7 +126,7 @@ namespace shu {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
 					socket_io_result_t res{ .res = -e };
-					reader_.on_read_cb(res, buffers_t{});
+					reader_.on_read_cb(owner_, res, buffers_t{});
 					return -e;
 				}
 			}
@@ -148,12 +148,12 @@ namespace shu {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
 					socket_io_result_t res{ .res = -e };
-					std::forward<func_on_write_t>(cb)(res);
+					std::forward<func_on_write_t>(cb)(owner_, res);
 					return false;
 				}
 			} else {
 				socket_io_result_t res{ .res = static_cast<int>(dwBytes)};
-				std::forward<func_on_write_t>(cb)(res);
+				std::forward<func_on_write_t>(cb)(owner_, res);
 
 				// 现在的write 在一定情况下，会直接成功，可能会漏掉stop 的机会
 				if (stop_
@@ -175,7 +175,9 @@ namespace shu {
 			char buffer_stack[65535];
 			buffer_t buf[2];
 			shu::zero_mem(buf[0]);
-			self->reader_.on_alloc_cb(65535, buf[0]);
+			if(self->reader_.on_alloc_cb) {
+				self->reader_.on_alloc_cb(self->owner_, buf[0]);
+			}
 			buf[1].p = buffer_stack;
 			buf[1].size = sizeof(buffer_stack);
 
@@ -197,7 +199,7 @@ namespace shu {
 					buf[0].size = res.res;
 				}
 			}
-			self->reader_.on_read_cb(res, buf);
+			self->reader_.on_read_cb(self->owner_, res, buf);
 
 			if (self->stop_) {
 				if(!self->writer_.running) {
@@ -216,7 +218,7 @@ namespace shu {
 				res.res = -s_last_error();
 			}
 			
-			self->writer_.on_write_cb(res);
+			self->writer_.on_write_cb(self->owner_, res);
 
 			if (self->stop_
 			&& !self->reader_.running 

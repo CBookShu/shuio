@@ -18,7 +18,7 @@ public:
     {
         auto ok = server_.start(&loop_, {
             .evClose = [](sacceptor*){},
-            .evConn = [this](socket_io_result_t res,
+            .evConn = [this](sacceptor* a, socket_io_result_t res,
                 ssocket* sock,
                 addr_pair_t addr) {
             on_client(res, sock, addr);}

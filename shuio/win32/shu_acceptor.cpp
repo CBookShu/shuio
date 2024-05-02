@@ -58,45 +58,22 @@ namespace shu {
 		}
 
 		int start() {
-			// 先创建 sock和对应的bind和listen
-			addrinfo hints { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
-            addrinfo *server_info {nullptr};
-			std::string_view ip(addr_pair_.local.ip.data());
-			std::string service = std::to_string(addr_pair_.local.port);
-			int rv = getaddrinfo(ip.data(), service.c_str(), &hints, &server_info);
-            if(rv != 0) {
-				socket_io_result_t res{ .res = -s_last_error() };
-				server_ctx_.evConn(res, nullptr, addr_pair_);
-				return res.res;
+			sockaddr_storage addr_acceptr;
+			shu::storage_2_sockaddr(&addr_pair_.local, &addr_acceptr);
+			sock_ = std::make_unique<ssocket>();
+            sock_->init(false, addr_acceptr.ss_family == AF_INET6);
+            socklen_t len = addr_acceptr.ss_family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+            if (int err = sock_->bind(&addr_acceptr, len); err <= 0) {
+                socket_io_result_t res{ .res = err };
+				server_ctx_.evConn(owner_, res, nullptr, addr_pair_);
+                return err;
             }
-            auto f_deleter = [](addrinfo* p){ freeaddrinfo(p);};
-            std::unique_ptr<addrinfo, void(*)(addrinfo*)> ptr(server_info, f_deleter);
-			int last_erro;
-            for (auto p = server_info; p != nullptr; p = p->ai_next) {
-                std::unique_ptr<ssocket> ptr_sock = std::make_unique<ssocket>();
-
-                ptr_sock->init(p->ai_socktype == SOCK_DGRAM, p->ai_family ==AF_INET6);
-                if (!ptr_sock->bind(p->ai_addr, p->ai_addrlen)) {
-					last_erro = s_last_error();
-                    continue;
-                }
-				
-				if(!ptr_sock->listen()) {
-					last_erro = s_last_error();
-					continue;
-				}
-
-				addr_pair_.local.family = p->ai_family;
-				sock_.swap(ptr_sock);
-                break;
+            if (int err = sock_->listen(); err <= 0) {
+                socket_io_result_t res{ .res = err };
+				server_ctx_.evConn(owner_, res, nullptr, addr_pair_);
+                return err;
             }
-
-			if(!sock_) {
-				socket_io_result_t res{ .res = -last_erro };
-				server_ctx_.evConn(res, nullptr, addr_pair_);
-				return res.res;
-			}
-
+			
 			sock_->reuse_addr(true);
 			sock_->noblock(true);
 
@@ -106,6 +83,7 @@ namespace shu {
 				run(entry);
 			});
 
+			int last_erro = 1;
 			accept_ops.resize(max_acceptor_post);
 			int doing_count = 0;
 			for (auto& op:accept_ops) {
@@ -123,7 +101,7 @@ namespace shu {
 				return 0;
 			}
 			acceptor->sock_ = std::make_unique<ssocket>();
-			acceptor->sock_->init(false, addr_pair_.local.family == AF_INET6);
+			acceptor->sock_->init(false, addr_pair_.local.family() == AF_INET6);
 
 			auto* client_sock = navite_cast_ssocket(acceptor->sock_.get());
 			auto* server_sock = navite_cast_ssocket(sock_.get());
@@ -139,7 +117,7 @@ namespace shu {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
 					socket_io_result_t res{ .res = -e };
-					server_ctx_.evConn(res, nullptr, addr_pair_);
+					server_ctx_.evConn(owner_, res, nullptr, addr_pair_);
 					return res.res;
 				}
 			}
@@ -156,7 +134,7 @@ namespace shu {
 			sockaddr_storage* local_addr = nullptr;
 			int remoteLen = 0;
 			int localLen = 0;
-			if (addr_pair_.local.family == AF_INET) {
+			if (addr_pair_.local.family() == AF_INET) {
 				remoteLen = sizeof(sockaddr_in);
 				localLen = sizeof(sockaddr_in);
 			} else {
@@ -182,7 +160,7 @@ namespace shu {
 				op->sock_.reset();
 			}
 
-			server_ctx_.evConn(res, op->sock_.release(), addr);
+			server_ctx_.evConn(owner_, res, op->sock_.release(), addr);
 
 			if (stop_) {
 				int left = 0;

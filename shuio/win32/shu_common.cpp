@@ -43,30 +43,45 @@ namespace shu {
 			auto* addr = static_cast<struct sockaddr_in*>(p);
 			storage->port = ntohs(addr->sin_port);
 			std::string_view sip(storage->ip.data());
-			::inet_ntop(storage->family, addr, storage->ip.data(), storage->ip.size());
+			::inet_ntop(addr_common->ss_family, addr, storage->ip.data(), storage->ip.size());
 		} else if (addr_common->ss_family == AF_INET6) {
 			auto* addr = static_cast<struct sockaddr_in6*>(p);
 			storage->port = ntohs(addr->sin6_port);
 			std::string_view sip(storage->ip.data());
-			::inet_ntop(storage->family, addr, storage->ip.data(), storage->ip.size());
+			::inet_ntop(addr_common->ss_family, addr, storage->ip.data(), storage->ip.size());
 		} else {
 			shu::panic(false, std::string("error family:") + std::to_string(addr_common->ss_family));
 		}
 	}
 
 	bool storage_2_sockaddr(addr_storage_t* storage, void* p) {
-		if(storage->family == AF_INET) {
+		int family = storage->family();
+		if(family == AF_INET) {
 			auto* addr = static_cast<struct sockaddr_in*>(p);
-			addr->sin_family = storage->family;
+			addr->sin_family = family;
 			addr->sin_port =  htons(storage->port);
-			return ::inet_pton(storage->family, storage->ip.data(), &(addr->sin_addr)) == 1;
-		} else if (storage->family == AF_INET6) {
+			return ::inet_pton(family, storage->ip.data(), &(addr->sin_addr)) == 1;
+		} else if (family == AF_INET6) {
 			auto* addr = static_cast<struct sockaddr_in6*>(p);
-			addr->sin6_family = storage->family;
+			addr->sin6_family = family;
 			addr->sin6_port =  htons(storage->port);
-			return ::inet_pton(storage->family, storage->ip.data(), &(addr->sin6_addr)) == 1;
+			return ::inet_pton(family, storage->ip.data(), &(addr->sin6_addr)) == 1;
 		} else {
-			shu::panic(false, std::string("error family:") + std::to_string(storage->family));
+			shu::panic(false, std::string("error family:") + std::to_string(family));
+			return false;
 		}
+	}
+
+	int addr_storage_t::family()  {
+		std::string_view s(ip.data());
+		auto pos = s.find('.');
+		if (pos != std::string_view::npos) {
+			return AF_INET;
+		}
+		pos = s.find(':');
+		if (pos != std::string_view::npos) {
+			return AF_INET6;
+		}
+		return 0;
 	}
 }
