@@ -1,4 +1,5 @@
 #include <iostream>
+#include <atomic>
 #include "shuio/shuio.h"
 
 using namespace shu;
@@ -67,7 +68,7 @@ public:
         buffer_t buf;
         buf.p = wt_buffer_.data();
         buf.size = wt_buffer_.size();
-        s_->write(buf, [this](socket_io_result res){
+        s_->write(buf, [this](sstream* s, socket_io_result res){
             on_write(res);
         });
     }
@@ -188,10 +189,10 @@ void Session::on_connect(socket_io_result res, ssocket* s, const addr_pair_t& ad
         }
     });
     s_ = stream_ptr.release();
-    s_->read([this](socket_io_result res, buffers_t bufs){
+    s_->read([this](sstream*s, socket_io_result res, buffers_t bufs){
         on_read(res, bufs);
     },
-    [this](int size, buffer_t& buf){
+    [this](sstream*s, buffer_t& buf){
         rd_buffer_.resize(suggest_buf_alloc);
         buf.p = rd_buffer_.data();
         buf.size = rd_buffer_.size();
@@ -200,7 +201,7 @@ void Session::on_connect(socket_io_result res, ssocket* s, const addr_pair_t& ad
     buffer_t buf;
     buf.p = owner_->getMessage().data();
     buf.size = owner_->getMessage().size();
-    s_->write(buf, [this](socket_io_result res){
+    s_->write(buf, [this](sstream*s, socket_io_result res){
         on_write(res);
     });
 }

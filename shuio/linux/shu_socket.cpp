@@ -23,18 +23,20 @@ namespace shu {
 			close();
 		}
 
-		void init(bool udp) {
-			shu::exception_check(fd == -1);
+		void init(bool udp, bool v6) {
+			shu::panic(fd == -1);
 			int type = SOCK_STREAM;
 			int protocol = IPPROTO_TCP;
 			if (udp == 1) {
 				type = SOCK_DGRAM;
 				protocol = IPPROTO_UDP;
 			}
-			
-			fd = ::socket(AF_INET, type, protocol);
-			shu::exception_check(fd != -1);
-			opt_.flags.udp = udp;
+			int family = AF_INET;
+			if (v6) {
+				family = AF_INET6;
+			}
+			fd = ::socket(family, type, protocol);
+			shu::panic(fd != -1);
 		}
 
 		bool noblock(bool flag) {
@@ -90,6 +92,35 @@ namespace shu {
 			}
 			return false;
 		}
+		int keepalive(bool enable,int delay) {
+			if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable))) {
+				return -s_last_error();
+			}	  
+
+			if (!enable) {
+				return 1;
+			}
+
+			if (delay < 1) {
+				return -1;
+			}
+
+			if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &delay, sizeof(delay))) {
+				return -s_last_error();
+			}
+
+			int intvl = 1;  /* 1 second; same as default on Win32 */
+			if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl))) {
+				return -s_last_error();
+			}
+
+			int cnt = 10;  /* 10 retries; same as hardcoded on Win32 */
+  			if (setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt))) {
+				return -s_last_error();
+			}
+
+			return -s_last_error();
+		}
 
 		bool nodelay(bool flag)
 		{
@@ -105,26 +136,20 @@ namespace shu {
 			return false;
 		}
 
-		bool bind(addr_storage_t addr) {
-			sockaddr_in addr_in{};
-			addr_in.sin_family = AF_INET;
-			addr_in.sin_port = htons(addr.port);
-			if (addr.ip.empty()) {
-				addr_in.sin_addr.s_addr = INADDR_ANY;
+		int bind(struct sockaddr* addr, std::size_t len) {
+			int r = ::bind(fd, addr, len);
+			if (r == 0) {
+				return 1;
 			}
-			else {
-				auto r = ::inet_pton(AF_INET, addr.ip.c_str(), &addr_in.sin_addr);
-				if (r != 1) {
-					return false;
-				}
-			}
-
-			auto r = ::bind(fd, (struct sockaddr*)&addr_in, sizeof(addr_in));
-			return r == 0;
+			return -s_last_error();
 		}
 
-		bool listen() {
-			return ::listen(fd, SOMAXCONN) == 0;
+		int listen() {
+			int r = ::listen(fd, SOMAXCONN);
+			if (0 == r) {
+				return 1;
+			}
+			return -s_last_error();
 		}
 
 		void close() {
@@ -138,14 +163,18 @@ namespace shu {
 			return fd != -1;
 		}
 
-		void shutdown(shutdown_type how) {
+		int shutdown(shutdown_type how) {
 			int t = SHUT_RD;
 			if (how == shutdown_type::shutdown_write)
 				t = SHUT_WR;
 			else if(how == shutdown_type::shutdown_both){
 				t = SHUT_RDWR;
 			}
-			::shutdown(fd, t);
+			int r = ::shutdown(fd, t);
+			if (0 == r) {
+				return 1;
+			}
+			return -s_last_error();
 		}
     };
 
@@ -166,9 +195,9 @@ namespace shu {
 		return ss_;
 	}
 
-    void ssocket::init(bool udp)
+    void ssocket::init(bool udp, bool v6)
 	{
-		return ss_->init(udp);
+		return ss_->init(udp, v6);
 	}
 
     auto ssocket::option() -> const ssocket_opt*
@@ -176,31 +205,35 @@ namespace shu {
 		return &ss_->opt_;
 	}
 
-	auto ssocket::noblock(bool flag) -> bool
+	int ssocket::noblock(bool flag)
 	{
 		return ss_->noblock(flag);
 	}
 
-	auto ssocket::reuse_addr(bool flag) -> bool
+	int ssocket::reuse_addr(bool flag)
 	{
 		return ss_->reuse_addr(flag);
 	}
 
-	auto ssocket::reuse_port(bool flag) -> bool
+	int ssocket::reuse_port(bool flag)
 	{
         return ss_->reuse_port(flag);
 	}
 
-	auto ssocket::nodelay(bool flag) -> bool
+	int ssocket::keepalive(bool enable,int delay) {
+		return ss_->keepalive(enable, delay);
+	}
+
+	int ssocket::nodelay(bool flag)
 	{
 		return ss_->nodelay(flag);
 	}
 
-	bool ssocket::bind(addr_storage_t addr) {
-		return ss_->bind(addr);
+	int ssocket::bind(void* addr, std::size_t len) {
+		return ss_->bind((struct sockaddr*)addr, len);
 	}
 
-	bool ssocket::listen() {
+	int ssocket::listen() {
 		return ss_->listen();
 	}
 
@@ -212,7 +245,7 @@ namespace shu {
 		return ss_->valid();
 	}
 
-	void ssocket::shutdown(shutdown_type how) {
+	int ssocket::shutdown(shutdown_type how) {
 		return ss_->shutdown(how);
 	}
 }

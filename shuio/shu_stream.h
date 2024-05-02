@@ -19,9 +19,9 @@ namespace shu {
 		sstream_t* s_;
 		S_DISABLE_COPY(sstream);
 	public:
-		using func_on_read_t = std::function<void(socket_io_result_t, buffers_t)>;
-		using func_on_write_t = std::function<void(socket_io_result_t)>;
-		using func_alloc_t = std::function<void(int, buffer_t&)>;
+		using func_on_read_t = std::function<void(sstream*,socket_io_result_t, buffers_t)>;
+		using func_on_write_t = std::function<void(sstream*,socket_io_result_t)>;
+		using func_alloc_t = std::function<void(sstream*,buffer_t&)>;
 		using func_close_t = std::function<void(sstream*)>;
 
 		struct stream_ctx_t {
@@ -42,7 +42,7 @@ namespace shu {
 
 		auto get_ud() -> std::any*;
 		
-		int read(func_on_read_t&& cb, func_alloc_t&& alloc);
+		int read(func_on_read_t&& cb, func_alloc_t&& alloc = {});
 
 		bool write(buffer_t buf, func_on_write_t&& cb);
 		bool write(buffers_t bufs, func_on_write_t&& cb);

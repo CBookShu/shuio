@@ -1,17 +1,19 @@
 #pragma once
 #include <liburing.h>
 #include <sys/socket.h>
+#include <netdb.h>
 #include <cstdint>
 #include <mutex>
 #include <chrono>
 #include <functional>
 #include <variant>
 
+#include "shuio/shu_common.h"
+
 
 namespace shu {
     typedef struct uring_navite_t {
         struct io_uring ring;
-        std::mutex sqe_mutex;
         int efd;        // epoll fd
     }uring_navite_t;
     
@@ -42,11 +44,11 @@ namespace shu {
 
     inline void io_uring_push_sqe(sloop* sl, auto&& f) {
         auto* l = navite_cast_sloop(sl);
-        std::scoped_lock guard(l->sqe_mutex);
+        // std::scoped_lock guard(l->sqe_mutex);
         f(&l->ring);
     }
     inline auto io_uring_push_sqe(uring_navite_t* l, auto&& f) {
-        std::scoped_lock guard(l->sqe_mutex);
+        // std::scoped_lock guard(l->sqe_mutex);
         f(&l->ring);
     }
 

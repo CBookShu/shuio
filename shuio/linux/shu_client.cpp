@@ -7,61 +7,77 @@
 #include <arpa/inet.h>
 
 namespace shu {
-    struct sclient::sclient_t : std::enable_shared_from_this<sclient_t>
+    struct sclient::sclient_t
     {
         sloop* loop_;
-        addr_storage_t addr_;
-        struct sockaddr_in local_addr_;
-        func_connect_t callback_;
+        sclient* owner_;
+        addr_pair_t addr_pair_;
+        sockaddr_storage addr_con_;
+        sclient_ctx cb_ctx_;
         std::unique_ptr<ssocket> sock_;
-        std::shared_ptr<sclient_t> holder_;
         bool stop_;
+        bool close_;
+        bool op_;
 
-        sclient_t(sloop* loop, func_connect_t&& callback, addr_storage_t addr) {
-            loop_ = loop;
-            stop_ = false;
-            addr_ = addr;
-            callback_ = std::forward<func_connect_t>(callback);
+        sclient_t(sloop* loop,sclient* owner, sclient_ctx&& cb_ctx, addr_storage_t addr) 
+        : loop_(loop),owner_(owner),addr_pair_{.remote = addr},cb_ctx_(std::forward<sclient_ctx>(cb_ctx)),
+        stop_(false), close_(false), op_(false)
+        {
+            shu::panic(!!cb_ctx_.evConn);
         }
 
-        void start() {
+        void post_to_close() {
+            if(std::exchange(close_, true)) {
+                return;
+            }
+            if(cb_ctx_.evClose) {
+                loop_->post([f = std::move(cb_ctx_.evClose), owner=owner_](){
+                    f(owner);
+                });
+            }
+        }
+
+        int start() {
+            shu::storage_2_sockaddr(&addr_pair_.remote, &addr_con_);
             sock_ = std::make_unique<ssocket>();
-            sock_->init(addr_.udp);
+            sock_->init(false, addr_con_.ss_family == AF_INET6);
+            sock_->noblock(true);
             navite_fd_setcallback(sock_.get(), [this](io_uring_cqe* cqe){
                 run(cqe);
             });
 
+            op_ = true;
             io_uring_push_sqe(loop_, [&](io_uring* ring){
                 auto* navite_sock = navite_cast_ssocket(sock_.get());
                 auto* sqe = io_uring_get_sqe(ring);
-                storage_2_sockaddr(&addr_, &local_addr_);
-                io_uring_prep_connect(sqe, navite_sock->fd, (struct sockaddr*)&local_addr_, sizeof(sockaddr_in));
+                io_uring_prep_connect(sqe, navite_sock->fd, (struct sockaddr*)&addr_con_, sizeof(addr_con_));
                 io_uring_sqe_set_data(sqe, &navite_sock->tag);
                 io_uring_submit(ring);
             });
 
-            holder_ = shared_from_this();
+            return 1;
         }
 
         void run(io_uring_cqe* cqe) {
+            op_ = false;
+            socket_io_result res{.res = 1};
             if(cqe->res < 0) {
-                socket_io_result res{.bytes = 0, .err = 1, .naviteerr = cqe->res};
-                callback_(res, nullptr, addr_pair_t{.remote = addr_,.local = {}});
+                res.res = cqe->res;
             } else {
-                socket_io_result res{.bytes = 0, .err = 0, .naviteerr = 0};
-                struct sockaddr_in addr;
-                socklen_t len = sizeof(addr);
+                res.res = 1;
+                sockaddr_storage addr_common;
+                socklen_t len = addr_con_.ss_family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
                 auto* navite_sock = navite_cast_ssocket(sock_.get());
-                addr_pair_t addr_pair{
-                    .remote = addr_
-                };
-                if (0 == getsockname(navite_sock->fd, (struct sockaddr*)&addr, &len)) {
-                    sockaddr_2_storage(&addr, &addr_pair.local);
+                if (0 == getsockname(navite_sock->fd, (struct sockaddr*)&addr_common, &len)) {
+                    sockaddr_2_storage(&addr_common, &addr_pair_.local);
                 }
-                callback_(res, std::move(sock_), addr_pair);
             }
 
-            holder_.reset();
+            cb_ctx_.evConn(res, sock_.release(), addr_pair_);
+
+            if(stop_) {
+                post_to_close();
+            }
         }
 
         void stop() {
@@ -69,44 +85,42 @@ namespace shu {
                 return;
             }
 
-            io_uring_push_sqe(loop_, [&](io_uring* ring){
-                auto* navie_sock = navite_cast_ssocket(sock_.get());
-                struct io_uring_sqe *read_sqe = io_uring_get_sqe(ring);
-                io_uring_prep_cancel(read_sqe, &navie_sock->tag, 0);
-                io_uring_submit(ring);
-            });
+            if (op_) {
+                io_uring_push_sqe(loop_, [&](io_uring* ring){
+                    auto* navie_sock = navite_cast_ssocket(sock_.get());
+                    struct io_uring_sqe *read_sqe = io_uring_get_sqe(ring);
+                    io_uring_prep_cancel(read_sqe, &navie_sock->tag, 0);
+                    io_uring_submit(ring);
+                });
+            } else {
+                
+            }
         }
     };
     
 
-    sclient::sclient()
+    sclient::sclient(): s_(nullptr)
     {}
     sclient::sclient(sclient&& other) noexcept
     {
-        s_.swap(other.s_);
+        s_ = std::exchange(other.s_, nullptr);
     }
     sclient::~sclient()
     {
-        auto sptr = s_.lock();
-        if (sptr) {
-
+        if (s_) {
+            delete s_;
         }
     }
-    void sclient::start(sloop* loop, addr_storage_t saddr, func_connect_t&& cb)
+    int sclient::start(sloop* loop, addr_storage_t addr, sclient_ctx&& cb_ctx)
     {
-        auto sptr = std::make_shared<sclient_t>(loop, std::forward<func_connect_t>(cb), saddr);
-        s_ = sptr;
-        loop->dispatch([sptr]() {
-            sptr->start();
-        });
+        shu::panic(!s_);
+        s_ = new sclient_t(loop, this,  std::forward<sclient_ctx>(cb_ctx), addr);
+        return s_->start();
     }
     void sclient::stop()
     {
-        if (auto sptr = s_.lock()) {
-            sptr->loop_->dispatch([sptr]() {
-                sptr->stop();
-            });
-        }
+        shu::panic(s_);
+        s_->stop();
     }
 
 };

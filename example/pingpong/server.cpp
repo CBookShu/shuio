@@ -1,6 +1,7 @@
 #include <iostream>
 #include "shuio/shuio.h"
 
+#include <optional>
 #include <memory_resource>
 
 using namespace shu;
@@ -53,11 +54,11 @@ public:
         rwbuf->rd_buf.value().resize(4096);
         
         auto p = stream_ptr.release();
-        p->read([this, p](socket_io_result res, buffers_t bufs){
-            on_read(p, res, bufs);
+        p->read([this](sstream* s, socket_io_result res, buffers_t bufs){
+            on_read(s, res, bufs);
         },
-        [this, p](int size, buffer_t& buf){
-            auto* rwbuf = shu::get_user_data<stream_with_buf>(*p);
+        [this](sstream* s, buffer_t& buf){
+            auto* rwbuf = shu::get_user_data<stream_with_buf>(*s);
             buf.p = rwbuf->rd_buf.value().data();
             buf.size = rwbuf->rd_buf.value().size();
         });
@@ -70,15 +71,11 @@ public:
         }
 
         auto* rwbuf = shu::get_user_data<stream_with_buf>(*s);
-        rwbuf->wt_buf.value().assign(buf[0].p, buf[0].p + buf[0].size);
-        rwbuf->wt_buf.value().insert(
-            rwbuf->wt_buf.value().end(),
-            buf[1].p, buf[1].p + buf[1].size
-        );
+        shu::copy_from_buffers_1(rwbuf->wt_buf.value(), buf);
         buffer_t wbuf;
         wbuf.p = rwbuf->wt_buf.value().data();
         wbuf.size = res.res;
-        s->write(wbuf, [this,s](socket_io_result_t res) mutable {
+        s->write(wbuf, [this](sstream*s, socket_io_result_t res) mutable {
             on_write(s,res);
         });
     }

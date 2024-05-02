@@ -76,18 +76,15 @@ public:
             }
         });
         auto p = stream_ptr.release();
-        p->read([this, p](socket_io_result res, buffers_t bufs){
-            on_read(p, res, bufs);
-        },
-        [this, p](int size, buffer_t& buf){
-            // 可以是空的，不使用外部的buf
+        p->read([this](sstream* s, socket_io_result res, buffers_t bufs){
+            on_read(s, res, bufs);
         });
 
         buffer_t buf;
         buf.p = gMsg;
         buf.size = strlen(gMsg);
-        p->write(buf, [this, p](socket_io_result res){
-            on_write(p, res);
+        p->write(buf, [this](sstream* s, socket_io_result res){
+            on_write(s, res);
         });
     }
     
@@ -110,14 +107,72 @@ public:
 private:
     sloop& loop_;
     sacceptor server_;
-    std::pmr::unsynchronized_pool_resource pool_;
 };
+
+static void tcp_server_test() {
+    sloop loop;
+    tcp_server server(loop, {8888,"127.0.0.1"});
+    loop.run();
+}
+
+class tcp_client {
+    sloop* loop_;
+    sclient client_;
+public:
+    tcp_client(sloop* loop, addr_storage_t addr) 
+    : loop_(loop)
+    {
+        auto r = client_.start(loop_, addr, {
+            .evClose = [](sclient *) {},
+            .evConn = [this](socket_io_result res, ssocket* sock, const addr_pair_t& addr) {
+                on_client(res, sock, addr);
+            }
+        });
+        shu::panic(r > 0);
+    }
+
+    void on_client(socket_io_result res, ssocket* sock, const addr_pair_t& addr) {
+        if (res.res <= 0) {
+            client_.stop();
+            return;
+        }
+
+        auto stream = std::make_unique<sstream>();
+        stream->start(loop_, sock, {.addr = addr}, {
+            .evClose = [](sstream* s){
+                delete s;
+            },
+        });
+        auto* s = stream.release();
+        s->read([this](sstream* s, socket_io_result_t res, buffers_t bufs){
+            on_read(s, res, bufs);
+        });
+    }
+
+    void on_read(sstream* s, socket_io_result res, buffers_t bufs) {
+        if (res.res <= 0) {
+            s->stop();
+            return;
+        }
+
+        std::string str;
+        shu::copy_from_buffers(str, bufs);
+        std::cout << str << std::endl;
+    }
+    void on_write(socket_io_result res) {
+
+    }
+};
+
+static void tcp_client_test() {
+    sloop loop;
+    tcp_client server(&loop, {8888,"127.0.0.1"});
+    loop.run();
+}
 
 int main(int argc, char**argv)
 {
-    sloop loop;
-    tcp_server server(loop, {8888});
-    loop.run();
+    tcp_client_test();
     return 0;
 }
 

@@ -126,7 +126,7 @@ namespace shu {
                 ok = true;
                 break;
             }
-            shu::exception_check(ok, "liuring init faild");
+            shu::panic(ok, "liuring init faild");
             run_tid_ = std::this_thread::get_id();
         }
         ~sloop_t() {
@@ -135,7 +135,7 @@ namespace shu {
             }
         }
         void run() {
-            shu::exception_check(std::this_thread::get_id() == run_tid_,"run tid != loop create tid");
+            shu::panic(std::this_thread::get_id() == run_tid_,"run tid != loop create tid");
             on_start();
 
             for(;;) {
@@ -193,7 +193,7 @@ namespace shu {
         }
 
         void post(func_t&& cb) {
-            shu::exception_check(ring.ring_fd != -1);
+            shu::panic(ring.ring_fd != -1);
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 tasks_.emplace_back(std::forward<func_t>(cb));
@@ -282,7 +282,7 @@ namespace shu {
         }
 
         void check_thread(std::source_location call) {
-            shu::exception_check(std::this_thread::get_id() == run_tid_, "", call);
+            shu::panic(std::this_thread::get_id() == run_tid_, "", call);
         }
     };
 

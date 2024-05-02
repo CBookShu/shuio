@@ -11,7 +11,6 @@ set_languages("c++20")
 target("shuio")
     set_kind("static")
     add_includedirs("$(projectdir)", {public = true})
-    add_files("shuio/*.cpp")
     if is_os("windows") then
         add_files("shuio/win32/*.cpp")
     elseif is_os("linux") then

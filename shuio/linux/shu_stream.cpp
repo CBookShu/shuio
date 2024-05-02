@@ -8,45 +8,46 @@
 #include <bitset>
 
 namespace shu {
-    struct sstream::sstream_t : public std::enable_shared_from_this<sstream_t> {
+    struct sstream::sstream_t {
         sstream_opt opt_;
         sloop* loop_;
+        sstream* owner_;
         std::unique_ptr<ssocket> sock_;
-
-        std::unique_ptr<socket_buffer> read_buffer_;
-        std::vector<socket_buffer> write_buffer_;
-        std::shared_ptr<sstream_t> holder_;
-
+        stream_ctx_t cb_ctx_;
+        
         io_uring_task_union read_complete_;
-        sstream::func_read_t read_cb_;
+        func_on_read_t on_read_cb_;
+        func_alloc_t on_alloc_cb_;
 
         io_uring_task_union write_complete_;
-        sstream::func_write_t write_cb_;
+        func_on_write_t on_write_cb_;
 
         bool stop_;
         bool reading_;
         bool writing_;
+        bool close_;
         
-        sstream_t(sloop* loop, ssocket* sock, sstream_opt opt, sstream::func_read_t&& read_cb, sstream::func_write_t&& write_cb) {
-            loop_ = loop;
-            sock_.reset(sock);
-            opt_ = opt;
+        std::any ud_;
 
-            read_buffer_ = std::make_unique<socket_buffer>(opt.read_buffer_init);
-
-            read_cb_ = std::forward<sstream::func_read_t>(read_cb);
-            write_cb_ = std::forward<sstream::func_write_t>(write_cb);
-
-            stop_ = false;
-            reading_ = false;
-            writing_ = false;
+        sstream_t(sloop* loop, sstream* owner, ssocket* sock, sstream_opt opt, stream_ctx_t&& cb_ctx) 
+        : loop_(loop), owner_(owner),sock_(sock), opt_(opt), cb_ctx_(std::forward<stream_ctx_t>(cb_ctx)),
+        stop_(false), reading_(false), writing_(false), close_(false)
+        {
+            
         }
 
-        ~sstream_t() {
-
+        void post_to_close() {
+            if (std::exchange(close_, true)) {
+                return;
+            }
+            if (cb_ctx_.evClose) {
+                loop_->post([f = std::move(cb_ctx_.evClose), owner=owner_](){
+                    f(owner);
+                });
+            }
         }
 
-        void start() {
+        int start() {
             read_complete_ = io_uring_socket_t();
             std::get_if<io_uring_socket_t>(&read_complete_)->cb = [this](io_uring_cqe* cqe){
                 run_read(cqe);
@@ -55,134 +56,114 @@ namespace shu {
             std::get_if<io_uring_socket_t>(&write_complete_)->cb = [this](io_uring_cqe* cqe){
                 run_write(cqe);
             };
-            holder_ = shared_from_this();
-            post_read();
+            return 1;
         }
 
-        void check_close_and_destroy() {
-            if (!reading_ && !writing_) {
-                holder_.reset();
-            }
-        }
+        int init_read(func_on_read_t&& cb, func_alloc_t&& alloc) {
+			shu::panic(!reading_);
+			int err = sock_->noblock(true);
+			if (err <= 0) {
+				socket_io_result res{err};	
+				std::forward<func_on_read_t>(cb)(owner_, res, buffers_t{});
+				return err;
+			}
 
-        void post_write(socket_buffer* buf) {
-            if (buf) {
-                if (stop_) {
-                    // 准备停止了，别写了，省的一直有buff 停不下来
-                    // panic?
-                    return;
-                }
-                if (!buf->ready().empty()) {
-                    write_buffer_.emplace_back(std::move(*buf));
-                }
-            }
+			err = sock_->nodelay(true);
+			if (err <= 0) {
+				socket_io_result res{err};
+                std::forward<func_on_read_t>(cb)(owner_, res, buffers_t{});
+				return err;
+			}
 
-            if (std::exchange(writing_, true)) {
-                return;
+            on_read_cb_ = std::forward<func_on_read_t>(cb);
+            on_alloc_cb_ = std::forward<func_alloc_t>(alloc);
+			return post_read();
+		}
+
+        bool post_write(buffers_t bufs, func_on_write_t&& cb) {
+            if(writing_) {
+                return false;
             }
             
-            io_uring_push_sqe(loop_, [this](io_uring* ring){
+            io_uring_push_sqe(loop_, [this, &bufs](io_uring* ring){
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                std::vector<struct iovec> bufs(write_buffer_.size());
-                for(std::size_t i = 0; i < bufs.size(); ++i) {
-                    auto b = write_buffer_[i].ready();
-                    bufs[i].iov_base = b.data();
-                    bufs[i].iov_len = b.size();
-                }
                 auto* sock = navite_cast_ssocket(sock_.get());
-                io_uring_prep_writev(sqe, sock->fd, bufs.data(), bufs.size(), 0);
+                io_uring_prep_writev(sqe, sock->fd, reinterpret_cast<iovec*>(bufs.data()), bufs.size(), 0);
                 io_uring_sqe_set_data(sqe, &write_complete_);
                 io_uring_submit(ring);
             });
+
+            on_write_cb_ = std::forward<func_on_write_t>(cb);
+            writing_ = true;
+            return true;
         }
 
-        void post_read() {
+        int post_read() {
             reading_ = true;
             io_uring_push_sqe(loop_, [this](io_uring* ring){
                 struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
-                auto buf = read_buffer_->prepare(opt_.read_buffer_count_per_op);
-
                 auto* sock = navite_cast_ssocket(sock_.get());
-                io_uring_prep_recv(sqe, sock->fd, buf.data(), buf.size(), 0);
+                io_uring_prep_recv(sqe, sock->fd, nullptr, 0, 0);
                 io_uring_sqe_set_data(sqe, &read_complete_);
                 io_uring_submit(ring);
             });
+            return 1;
         }
 
         void run_read(io_uring_cqe* cqe) {
             reading_ = false;
-            auto _finaly = s_defer([this, self = holder_](){
-                check_close_and_destroy();
-            });
-            read_ctx_t ctx{ .buf = *read_buffer_ };
-            socket_io_result res;
+
+            socket_io_result res{.res = cqe->res};
             if(cqe->res < 0) {
-                res = {.bytes = 0, .err = -1, .naviteerr = cqe->res};
-            } else if(cqe->res > 0) {
-                res = {.bytes = static_cast<std::uint32_t>(cqe->res), .err = 0, .naviteerr = 0};
-                read_buffer_->commit(cqe->res);
-            } else if(cqe->res == 0) {
-                res = {.bytes = 0, .err = -1, .naviteerr = 0};
-            }
-            read_cb_(res, ctx);
-
-            if(res.err != 0) {
-                // 读失败 主动停止
-                if (writing_) {
-                    stop();
+                on_read_cb_(owner_, res, buffers_t{});
+            } else {
+                char buffer_stack[65535];
+                buffer_t buf[2];
+                shu::zero_mem(buf[0]);
+                if(on_alloc_cb_) {
+                    on_alloc_cb_(owner_, buf[0]);
                 }
-                return;
+                
+                buf[1].p = buffer_stack;
+                buf[1].size = sizeof(buffer_stack);
+
+                auto* navite_sock = shu::navite_cast_ssocket(sock_.get());
+                auto r = ::readv(navite_sock->fd, (iovec*)buf, 2);
+                if (r <= 0) {
+                    res.res = -s_last_error();
+                    on_read_cb_(owner_, res, buffers_t{});
+                } else {
+                    res.res = r;
+                    auto diff = res.res - static_cast<int>(buf[0].size);
+                    if (diff >= 0) {
+                        buf[1].size = diff;
+                    } else {
+                        buf[1].size = 0;
+                        buf[0].size = res.res;
+                    }
+                    on_read_cb_(owner_, res, buf);
+                }
+            }
+            
+            if (stop_) {
+                if (!writing_) {
+                    post_to_close();
+                }
+            } else {
+                post_read();
             }
 
-            post_read();
         }
 
         void run_write(io_uring_cqe* cqe) {
             writing_ = false;
-            auto _finaly = s_defer([this, self = holder_](){
-                check_close_and_destroy();
-            });
 
-            socket_io_result_t res;
-            write_ctx_t ctx{ .bufs = write_buffer_ };
-            if(cqe->res < 0) {
-                res = socket_io_result_t{ .bytes = 0,.err = -1, .naviteerr = cqe->res };
-            } else if(cqe->res > 0) {
-                res = socket_io_result_t{ .bytes = static_cast<std::uint32_t>(cqe->res), .err = 0, .naviteerr = 0 };
-            } else if(cqe->res == 0) {
-                res = socket_io_result_t{ .bytes = 0, .err = 0, .naviteerr = 0 };
-            }
+            socket_io_result res{.res = cqe->res};
+            
+            on_write_cb_(owner_, res);
 
-            write_cb_(res, ctx);
-
-            auto total = cqe->res;
-            auto it = write_buffer_.begin();
-			for (; it != write_buffer_.end(); ++it) {
-				total -= it->consume(total);
-				auto ready = it->ready();
-				if (ready.size() > 0) {
-					break;
-				}
-			}
-			if (it != write_buffer_.begin()) {
-				write_buffer_.erase(write_buffer_.begin(), it);
-			}
-
-            if(res.err < 0) {
-                // 写入失败了 这里都写入失败了，还需要shutdown？
-                if (sock_ && sock_->valid()) {
-                    sock_->shutdown(shutdown_type::shutdown_write);
-                }
-                return;
-            }
-
-			if (!write_buffer_.empty()) {
-				post_write(nullptr);
-			}
-
-            if (!writing_ && stop_) {
-                // 要关闭了
-                sock_->shutdown(shutdown_type::shutdown_write);
+            if (stop_ && !reading_) {
+                post_to_close();
             }
         }
 
@@ -191,55 +172,65 @@ namespace shu {
                 return;
             }
 
-            // 等所有正在write的Buffer 发过去，以防整个包发一半
             if (writing_) {
                 return;
             }
-            auto _finally = s_defer([this, self = holder_](){
-                check_close_and_destroy();
-            });
-            // 直接关闭写，通知对方
-            sock_->shutdown(shutdown_type::shutdown_write);
-            writing_ = false;
+
+            if (reading_) {
+                io_uring_push_sqe(loop_, [&](io_uring* ring){
+                    auto* navie_sock = navite_cast_ssocket(sock_.get());
+                    struct io_uring_sqe *read_sqe = io_uring_get_sqe(ring);
+                    io_uring_prep_cancel(read_sqe, &read_complete_, 0);
+                    io_uring_submit(ring);
+                });
+            } else {
+                post_to_close();
+            }
         }
     };
 
-    sstream::sstream() {
+    sstream::sstream():s_(nullptr) {
     }
     sstream::sstream(sstream&& other) noexcept {
-        s_.swap(other.s_);
+        s_ = std::exchange(other.s_, nullptr);
     }
     sstream::~sstream() {
-        if(auto sptr = s_.lock()) {
-
+        if(s_) {
+            delete s_;
         }
     }
 
-    // just call once after new
-    auto sstream::start(sloop* l, ssocket* s, sstream_opt opt,
-		sstream::func_read_t&& rcb, sstream::func_write_t&& wcb) -> void {
-
-        auto sptr = std::make_shared<sstream::sstream_t>(l,s,opt,
-            std::forward<func_read_t>(rcb),std::forward<func_write_t>(wcb));
-        s_ = sptr;
-        l->dispatch([sptr](){
-            sptr->start();
-        });
+    int sstream::start(sloop* loop, ssocket* sock, sstream_opt opt, 
+			stream_ctx_t&& stream_event){
+        shu::panic(!s_);
+        s_ = new sstream_t(loop, this, sock, opt, std::forward<stream_ctx_t>(stream_event));
+        return s_->start();
     }
+
+    auto sstream::get_ud() -> std::any* {
+        shu::panic(s_);
+        return &s_->ud_;        
+    }
+
+    int sstream::read(func_on_read_t&& cb, func_alloc_t&& alloc) {
+        shu::panic(s_);
+        return s_->init_read(std::forward<func_on_read_t>(cb), std::forward<func_alloc_t>(alloc));
+    }
+
     // call after start read
-    void sstream::write(socket_buffer&& buff){
-        if(auto sptr = s_.lock()) {
-            sptr->loop_->dispatch([sptr, buf = {std::move(buff)}] () mutable{
-                sptr->post_write(const_cast<socket_buffer*>(buf.begin()));
-            });
-        }
+    bool sstream::write(buffer_t buf, func_on_write_t&& cb){
+        shu::panic(s_);
+        buffer_t bufs[1] = {buf};
+        return s_->post_write(bufs, std::forward<func_on_write_t>(cb));
+    }
+
+    bool sstream::write(buffers_t bufs, func_on_write_t&& cb) {
+        shu::panic(s_);
+        return s_->post_write(bufs, std::forward<func_on_write_t>(cb));
     }
 
     void sstream::stop() {
-        if(auto sptr = s_.lock()) {
-            sptr->loop_->dispatch([sptr](){
-                sptr->stop();
-            });
-        }
+        shu::panic(s_);
+        s_->stop();
     }
 };
