@@ -232,7 +232,6 @@ namespace shu {
 
 			if(writer_.running) {
 				// wait writing
-				sock_->shutdown(shutdown_type::shutdown_write);
 				return;
 			}
 			auto* navite_sock = navite_cast_ssocket(sock_.get());
