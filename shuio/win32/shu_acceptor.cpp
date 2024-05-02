@@ -8,7 +8,7 @@ namespace shu {
 
 	struct sacceptor::sacceptor_t {
 		struct acceptor_complete_t : OVERLAPPED {
-			enum { buffer_size = (sizeof(sockaddr) + 16) * 2 };
+			enum { buffer_size = (sizeof(sockaddr_storage) + 16) * 2 };
 
 			std::unique_ptr<ssocket> sock_;
 			char buffer_[buffer_size];
@@ -31,14 +31,13 @@ namespace shu {
 		sacceptor* owner_;
 		std::unique_ptr<ssocket> sock_;
 		addr_pair_t addr_pair_;
-		int aftype_;
 		sacceptor::event_ctx server_ctx_;
 		std::vector<acceptor_complete_t> accept_ops;
 		bool stop_;
 		bool close_;
 
 		sacceptor_t(sloop* loop, sacceptor* owner, event_ctx&& server_ctx, addr_storage_t addr)
-		: loop_(loop), owner_(owner), addr_pair_{.local = addr},aftype_(AF_UNSPEC),
+		: loop_(loop), owner_(owner), addr_pair_{.local = addr},
 		server_ctx_(std::forward<event_ctx>(server_ctx)), stop_(false),close_(false)
 		{
 			shu::panic(!!server_ctx_.evConn);
@@ -87,7 +86,7 @@ namespace shu {
 					continue;
 				}
 
-				aftype_ = p->ai_family;
+				addr_pair_.local.family = p->ai_family;
 				sock_.swap(ptr_sock);
                 break;
             }
@@ -124,7 +123,7 @@ namespace shu {
 				return 0;
 			}
 			acceptor->sock_ = std::make_unique<ssocket>();
-			acceptor->sock_->init(false, aftype_ == AF_INET6);
+			acceptor->sock_->init(false, addr_pair_.local.family == AF_INET6);
 
 			auto* client_sock = navite_cast_ssocket(acceptor->sock_.get());
 			auto* server_sock = navite_cast_ssocket(sock_.get());
@@ -152,24 +151,30 @@ namespace shu {
 			auto* op = static_cast<struct acceptor_complete_t*>(entry->lpOverlapped);
 			op->doing_ = false;
 
-			SOCKADDR_IN* ClientAddr = NULL;
-			SOCKADDR_IN* LocalAddr = NULL;
-			int remoteLen = sizeof(SOCKADDR_IN), localLen = sizeof(SOCKADDR_IN);
-
-			// TODO: 这里可以优化将第一个包和accept一并获取到！
-			// 我就喜欢这样的api，没有返回值！ 一定成功！
-			win32_extension_fns::GetAcceptExSockaddrs(op->buffer_, 0,
-				sizeof(SOCKADDR_IN) + 16, sizeof(SOCKADDR_IN) + 16,
-				(LPSOCKADDR*)&LocalAddr, &localLen,
-				(LPSOCKADDR*)&ClientAddr, &remoteLen);
-			
 			addr_pair_t addr{};
-			addr.remote.port = ntohs(ClientAddr->sin_port);
-			inet_ntop(ClientAddr->sin_family, &ClientAddr->sin_addr, addr.remote.ip.data(), addr.remote.ip.size());
+			sockaddr_storage* client_addr = nullptr;
+			sockaddr_storage* local_addr = nullptr;
+			int remoteLen = 0;
+			int localLen = 0;
+			if (addr_pair_.local.family == AF_INET) {
+				remoteLen = sizeof(sockaddr_in);
+				localLen = sizeof(sockaddr_in);
+			} else {
+				remoteLen = sizeof(sockaddr_in6);
+				localLen = sizeof(sockaddr_in6);
+			}
+			win32_extension_fns::GetAcceptExSockaddrs(op->buffer_, 0,
+					localLen + 16, remoteLen + 16,
+					(sockaddr**)&local_addr, &localLen,
+					(sockaddr**)&client_addr, &remoteLen);
+			
+			if (localLen == 0 || remoteLen == 0) {
 
-			addr.local.port = ntohs(LocalAddr->sin_port);
-			inet_ntop(LocalAddr->sin_family, &LocalAddr->sin_addr, addr.local.ip.data(), addr.local.ip.size());
-
+			} else {
+				shu::sockaddr_2_storage(client_addr, &addr.remote);
+				shu::sockaddr_2_storage(local_addr, &addr.local);
+			}
+			
 			socket_io_result_t res{ .res = 1 };
 			if(addr.local.port != addr_pair_.local.port) {
 				// err

@@ -199,10 +199,10 @@ namespace shu {
 			}
 			self->reader_.on_read_cb(res, buf);
 
-			if (self->stop_
-			&& !self->reader_.running 
-			&& !self->writer_.running ) {
-				self->post_to_close();
+			if (self->stop_) {
+				if(!self->writer_.running) {
+					self->post_to_close();
+				}
 			} else {
 				self->post_read();
 			}
