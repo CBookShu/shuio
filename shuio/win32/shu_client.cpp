@@ -65,6 +65,10 @@ namespace shu {
                 run(entry);
             });
             DWORD dwBytes = 0;
+
+            shu::zero_mem(addr);
+            len = addr.ss_family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+            shu::storage_2_sockaddr(&addr_pair_.remote, &addr);
             struct sockaddr* p = (struct sockaddr*)&addr;
             BOOL r = win32_extension_fns::ConnectEx(navite_sock->s, p, len, nullptr, 0, &dwBytes, &connector_);
             if (!r) {
@@ -87,7 +91,6 @@ namespace shu {
             }
             else {
                 socket_io_result res{ .res = 1 };
-                auto* navite_sock = navite_cast_ssocket(sock_.get());
                 cb_ctx_.evConn(res, sock_.release(), addr_pair_);
             }
 
