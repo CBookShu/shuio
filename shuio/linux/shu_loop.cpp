@@ -118,8 +118,9 @@ namespace shu {
             auto depths = {2048, 1024, 512, 256, 128};
             bool ok = false;
             for(auto& d:depths) {
-                // auto r = io_uring_queue_init(d, &ring, IORING_SETUP_IOPOLL);
-                auto r = io_uring_queue_init(d, &ring, 0);
+                // 2.6 版本的liburing 终于可以传入flags
+                // 使用IORING_SETUP_SQPOLL 可以让liburing的极限性能接近epoll
+                auto r = io_uring_queue_init(d, &ring, IORING_SETUP_SQPOLL);
                 if(r < 0) {
                     continue;
                 }
@@ -145,6 +146,8 @@ namespace shu {
                 bool hasstop = false;
                 auto ts = timers_.timer_wait_leatest();
                 io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
+
+                wake_up_ = true;
                 io_uring_for_each_cqe(&ring, head, cqe) {
                     count++;
                     if(cqe->user_data == LIBURING_UDATA_TIMEOUT) {
@@ -153,6 +156,7 @@ namespace shu {
                     if(cqe->user_data == 0) {
                         continue;
                     }
+                    
                     io_uring_task_union* ud = reinterpret_cast<io_uring_task_union*>(cqe->user_data);
                     std::visit
                     (
@@ -168,12 +172,15 @@ namespace shu {
                 }
                 io_uring_cq_advance(&ring, count);
 
+                wake_up_ = false;
                 on_tasks();
                 on_timer();
                 if(hasstop) {
                     break;
                 }
             }
+        
+            on_stop();
         }
 
         void stop() {
@@ -187,7 +194,7 @@ namespace shu {
         void wakeup() {
             io_uring_push_sqe(this, [&](io_uring* u){
                 auto* sqe = io_uring_get_sqe(u);
-                io_uring_sqe_set_data(sqe, reinterpret_cast<void*>(&tag_wake));
+                io_uring_prep_nop(sqe);
                 io_uring_submit(u);
             });
         }
@@ -200,8 +207,7 @@ namespace shu {
             }
 
             if(run_tid_ != std::this_thread::get_id()
-                || !wake_up_
-                || task_running_) {
+                || !wake_up_) {
                 wakeup();
             }
         }

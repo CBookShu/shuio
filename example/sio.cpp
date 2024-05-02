@@ -9,6 +9,7 @@
 #include <charconv>
 #include <optional>
 #include <memory_resource>
+#include <thread>
 
 using namespace shu;
 using namespace std;
@@ -170,9 +171,30 @@ static void tcp_client_test() {
     loop.run();
 }
 
+static void loop_post() {
+    std::cout << "loop_post start" << std::endl;
+    sloop loop;
+    int n = 0;
+    int count = 10000000;
+    std::thread t([&](){
+        for (int i = 0; i < count; ++i) {
+            loop.post([&](){
+                n++;
+            });
+        }
+        while(n == count) {
+            std::this_thread::yield();
+        }
+        loop.stop();
+    });
+    loop.run();
+    t.join();
+    std::cout << "loop_post end" << std::endl;
+}
+
 int main(int argc, char**argv)
 {
-    tcp_client_test();
+    loop_post();
     return 0;
 }
 
