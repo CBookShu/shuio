@@ -93,7 +93,7 @@ namespace shu {
                     io_uring_submit(ring);
                 });
             } else {
-                
+                post_to_close();
             }
         }
     };
