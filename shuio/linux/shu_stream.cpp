@@ -62,12 +62,11 @@ namespace shu {
 
         int init_read(func_on_read_t&& cb, func_alloc_t&& alloc) {
 			shu::panic(!reading_);
-			// int err = sock_->noblock(true);
-			// if (err <= 0) {
-			// 	socket_io_result res{err};	
-			// 	std::forward<func_on_read_t>(cb)(owner_, res, buffers_t{});
-			// 	return err;
-			// }
+			if (auto err = sock_->noblock(true); err <= 0) {
+				socket_io_result res{err};	
+				std::forward<func_on_read_t>(cb)(owner_, res, buffers_t{});
+				return err;
+			}
 
 			if (auto err = sock_->nodelay(true); err <= 0) {
 				socket_io_result res{err};
