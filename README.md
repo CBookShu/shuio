@@ -16,13 +16,9 @@
 
 - 编译
 
-    1. xmake 编译
+    1. xmake 安装 https://github.com/xmake-io/xmake.git
         
-        安装 https://github.com/xmake-io/xmake.git
-        
-        cmd 或 PowerShell 中执行： xmake
-
-        xmake 还有很多丰富的功能，可以自行了解。
+        cmd 或 PowerShell 中执行： xmake project -k cmake
     
     2.  cmake 编译
         
