@@ -7,6 +7,7 @@
 using namespace shu;
 
 class tcp_server {
+    int stream_req_;
 public:
     struct stream_with_buf {
         std::optional<std::pmr::vector<char>> rd_buf;
@@ -14,20 +15,22 @@ public:
     };
 
     tcp_server(sloop& loop, addr_storage_t addr) 
-    :loop_(loop)
+    :loop_(loop),stream_req_(0)
     {
         auto ok = server_.start(&loop_, {
-            .evClose = [](sacceptor*){},
+            .evClose = [&loop](sacceptor*){
+                loop.stop();
+            },
             .evConn = [this](sacceptor* a, socket_io_result_t res,
                 ssocket* sock,
                 addr_pair_t addr) {
             on_client(res, sock, addr);}
         }, addr);
-        shu::panic(ok);
+        shu::panic(ok > 0);
     }
 
     ~tcp_server() {
-        server_.stop();
+        std::cout << "tcp server ~" << std::endl;
     }
 
     void on_client(socket_io_result_t res,
@@ -42,9 +45,11 @@ public:
         }
 
         auto stream_ptr = std::make_unique<sstream>();
-
+        int stream_req = ++stream_req_;
+        // fprintf(stdout, "stream new %d \r\n", stream_req);
         stream_ptr->start(&loop_, ptr.release(), {.addr = addr}, {
-            .evClose = [](sstream* s){
+            .evClose = [stream_req](sstream* s){
+                // fprintf(stderr, "stream req:%d ~ \r\n", stream_req);
                 delete s;
             }
         });
@@ -54,8 +59,9 @@ public:
         rwbuf->rd_buf.value().resize(4096);
         
         auto p = stream_ptr.release();
-        p->read([this](sstream* s, socket_io_result res, buffers_t bufs){
-            on_read(s, res, bufs);
+        p->read([this,stream_req](sstream* s, socket_io_result res, buffers_t bufs){
+            // fprintf(stdout, "stream on_read %d, %d \r\n", stream_req, res.res);
+            on_read(stream_req, s, res, bufs);
         },
         [this](sstream* s, buffer_t& buf){
             auto* rwbuf = shu::get_user_data<stream_with_buf>(*s);
@@ -64,18 +70,20 @@ public:
         });
     }
     
-    void on_read(sstream* s, socket_io_result_t res, buffers_t buf) {
+    void on_read(int stream_req, sstream* s, socket_io_result_t res, buffers_t buf) {
         if (res.res <= 0) {
             s->stop();
             return;
         }
 
         auto* rwbuf = shu::get_user_data<stream_with_buf>(*s);
-        shu::copy_from_buffers_1(rwbuf->wt_buf.value(), buf);
+        // shu::copy_from_buffers(rwbuf->wt_buf.value(), buf);
+        rwbuf->wt_buf.value().assign(buf[0].p, buf[0].p + buf[0].size);
         buffer_t wbuf;
         wbuf.p = rwbuf->wt_buf.value().data();
         wbuf.size = res.res;
-        s->write(wbuf, [this](sstream*s, socket_io_result_t res) mutable {
+        s->write(wbuf, [this,stream_req](sstream*s, socket_io_result_t res) mutable {
+            // fprintf(stdout, "stream on_write %d, %d \r\n", stream_req, res.res);
             on_write(s,res);
         });
     }
@@ -88,7 +96,6 @@ private:
     sacceptor server_;
     std::pmr::unsynchronized_pool_resource pool_;
 };
-
 
 int main() {
     using namespace shu;

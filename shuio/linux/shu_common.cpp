@@ -18,16 +18,16 @@ namespace shu {
 			auto path = std::filesystem::path(call.file_name());
 			std::stringstream ss;
 			if (msg.empty()) {
-				std::cerr
-				<< "Exception @file:" << path.filename().string()
-				<< " @line:" << call.line()
+				std::cerr << "Panic" << std::endl
+				<< " @file:" << path.filename().string() << std::endl
+				<< " @line:" << call.line() << std::endl
 				<< " @func:" << call.function_name();
 			}
 			else {
-				std::cerr
-				<< "Exception @msg:" << msg
-				<< " @file:" << path.filename().string()
-				<< " @line:" << call.line()
+				std::cerr << "Panic" << std::endl
+				<< " @msg:" << msg << std::endl
+				<< " @file:" << path.filename().string() << std::endl
+				<< " @line:" << call.line() << std::endl
 				<< " @func:" << call.function_name();
 			}
 			std::cerr << std::endl;

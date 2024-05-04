@@ -40,6 +40,7 @@ namespace shu {
             if (std::exchange(close_, true)) {
                 return;
             }
+            sock_->shutdown();
             if (cb_ctx_.evClose) {
                 loop_->post([f = std::move(cb_ctx_.evClose), owner=owner_](){
                     f(owner);
@@ -61,15 +62,13 @@ namespace shu {
 
         int init_read(func_on_read_t&& cb, func_alloc_t&& alloc) {
 			shu::panic(!reading_);
-			int err = sock_->noblock(true);
-			if (err <= 0) {
+			if (auto err = sock_->noblock(true); err <= 0) {
 				socket_io_result res{err};	
 				std::forward<func_on_read_t>(cb)(owner_, res, buffers_t{});
 				return err;
 			}
 
-			err = sock_->nodelay(true);
-			if (err <= 0) {
+			if (auto err = sock_->nodelay(true); err <= 0) {
 				socket_io_result res{err};
                 std::forward<func_on_read_t>(cb)(owner_, res, buffers_t{});
 				return err;
@@ -84,10 +83,11 @@ namespace shu {
             if(writing_) {
                 return false;
             }
-            
-            io_uring_push_sqe(loop_, [this, &bufs](io_uring* ring){
+
+            auto* sock = navite_cast_ssocket(sock_.get());
+            io_uring_push_sqe(loop_, [&](io_uring* ring){
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-                auto* sock = navite_cast_ssocket(sock_.get());
+                
                 io_uring_prep_writev(sqe, sock->fd, reinterpret_cast<iovec*>(bufs.data()), bufs.size(), 0);
                 io_uring_sqe_set_data(sqe, &write_complete_);
                 io_uring_submit(ring);
