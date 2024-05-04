@@ -4,6 +4,10 @@
     windows: vs2022,c++20
     linux: wsl2(ubuntu 22.04.2),c++20
 
+    shuio 定位的是更容易掌握的接口，用它可以比较稳定的组织IO 程序，并非是固定框架。shuio 的代码组织非常简单，跟原生裸写的性能差不多。
+    此外,shuio 除了在linux上需要使用 liburing之外，没有任何依赖。非常容易部署、理解、修改。
+    市面上大部分的IO 库或框架，都仅支持linux epoll，已经不新鲜了，于是这里使用uring，并且把win32 的iocp 也合并进来。
+
 # 部署
 - windows依赖
 
