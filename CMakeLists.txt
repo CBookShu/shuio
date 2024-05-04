@@ -148,8 +148,8 @@ if(MSVC)
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 target_sources(shuio PRIVATE
-    shuio/shu_buffer.cpp
     shuio/win32/shu_acceptor.cpp
+    shuio/win32/shu_buffer.cpp
     shuio/win32/shu_client.cpp
     shuio/win32/shu_common.cpp
     shuio/win32/shu_loop.cpp
