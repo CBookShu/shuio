@@ -2,6 +2,8 @@
 #include "linux_detail.h"
 
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <poll.h>
 
 #include <iostream>
 #include <cstring>
@@ -122,9 +124,8 @@ namespace shu {
         std::vector<task_node_t>  task_nodes_;
         std::unordered_set<std::uint64_t> cancels_;
 
-        // 增加task running 标志，减轻post的负载
-        bool wake_up_{false};
-        bool task_running_{false};
+        int event_fd_;
+        std::uint64_t event_fd_buf_;
 
         sloop_t() : task_req_(0) {
             auto depths = {2048, 1024, 512, 256, 128};
@@ -141,10 +142,22 @@ namespace shu {
             }
             shu::panic(ok, "liuring init faild");
             run_tid_ = std::this_thread::get_id();
+
+            if(event_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC); event_fd_ == -1) {
+                shu::panic(false, std::string("eventfd:") + std::to_string(s_last_error()));
+            }
+
+            if (int r = io_uring_register_eventfd(&ring, event_fd_); r != 0) {
+                shu::panic(false, std::string("io_uring_register_eventfd:") + std::to_string(r));
+            }
         }
         ~sloop_t() {
             if (ring.ring_fd != -1) {
                 io_uring_queue_exit(&ring);
+            }
+            if (event_fd_ != -1) {
+                close(event_fd_);
+                event_fd_ = -1;
             }
         }
         void run() {
@@ -162,13 +175,19 @@ namespace shu {
                 }
                 io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
 
-                wake_up_ = true;
                 io_uring_for_each_cqe(&ring, head, cqe) {
                     count++;
                     if(cqe->user_data == LIBURING_UDATA_TIMEOUT) {
                         continue;
                     }
+
                     if(cqe->user_data == 0) {
+                        continue;
+                    }
+
+                    if((void*)cqe->user_data == &event_fd_) {
+                        handle_eventfd();
+                        post_read_eventfd();
                         continue;
                     }
                     
@@ -187,7 +206,6 @@ namespace shu {
                 }
                 io_uring_cq_advance(&ring, count);
 
-                wake_up_ = false;
                 on_tasks();
                 on_timer();
                 if(hasstop) {
@@ -202,20 +220,13 @@ namespace shu {
             
         }
 
-        void wakeup() {
-            io_uring_push_sqe(this, [&](io_uring* u){
-                auto* sqe = io_uring_get_sqe(u);
-                io_uring_prep_nop(sqe);
-                io_uring_submit(u);
-            });
-        }
-
         void post(func_t&& cb) {
             shu::panic(ring.ring_fd != -1);
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 tasks_.emplace_back(std::forward<func_t>(cb));
             }
+            tasks_count_ ++;
 
             if(run_tid_ != std::this_thread::get_id()) {
                 wakeup();
@@ -230,9 +241,9 @@ namespace shu {
             post(std::forward<func_t>(cb));
         }
 
-        auto post_inloop(func&& cb) -> std::uint64_t {
+        auto post_inloop(func_t&& cb) -> std::uint64_t {
             auto id = task_req_++;
-            task_nodes_.emplace(task_node_t{.cb = std::function<func_t>(cb), .id = id});
+            task_nodes_.emplace_back(task_node_t{.cb = std::forward<func_t>(cb), .id = id});
             return id;
         }
 
@@ -240,8 +251,8 @@ namespace shu {
             cancels_.insert(id);
         }
 
-        void dispatch_inloop(func&& cb) {
-            std::forward<func>(cb)();
+        void dispatch_inloop(func_t&& cb) {
+            std::forward<func_t>(cb)();
         }
 
         auto add_timer(func_t&& cb, std::chrono::milliseconds time) -> sloop_timer_t_id {
@@ -281,11 +292,10 @@ namespace shu {
         }
 
         void on_start() {
-            wake_up_ = false;
+            post_read_eventfd();
         }
 
         void on_tasks() {
-            task_running_ = true;
             std::vector<func_t> pendings;
             {
                 std::lock_guard guard(mutex_);
@@ -305,14 +315,37 @@ namespace shu {
                 }
             }
             cancels_.clear();
-            task_running_ = false;
         }
         void on_stop() {
             timers_.stop_timer();
             io_uring_queue_exit(&ring);
             ring.ring_fd = -1;
 
+            close(event_fd_);
+            event_fd_ = -1;
+
             on_tasks();
+        }
+
+        void post_read_eventfd() {
+            shu::panic(event_fd_ != -1);
+            auto* sqe = io_uring_get_sqe(&ring);
+            io_uring_prep_poll_add(sqe, event_fd_, POLLIN);
+             io_uring_sqe_set_data(sqe, &event_fd_);
+            io_uring_submit(&ring);
+        }
+
+        void wakeup() {
+            shu::panic(event_fd_ != -1);
+            std::uint64_t v = 1;
+            int r = ::write(event_fd_, &v, sizeof(v));
+            shu::panic(r == sizeof(v));
+        }
+
+        void handle_eventfd() {
+            std::uint64_t v;
+            int r = ::read(event_fd_, &v, sizeof(v));
+            shu::panic(r == sizeof(v));
         }
 
         void check_thread(std::source_location call) {
@@ -373,5 +406,9 @@ namespace shu {
 
     auto sloop::stop() -> void {
         return loop_->stop();
+    }
+
+    void sloop::assert_thread(std::source_location call) {
+        return loop_->check_thread(std::move(call));
     }
 };
