@@ -42,7 +42,7 @@ namespace shu {
             }
             sock_->shutdown();
             if (cb_ctx_.evClose) {
-                loop_->post_inloop([f = std::move(cb_ctx_.evClose), owner=owner_](){
+                loop_->post([f = std::move(cb_ctx_.evClose), owner=owner_](){
                     f(owner);
                 });
             }

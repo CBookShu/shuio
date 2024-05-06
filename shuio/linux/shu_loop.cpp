@@ -114,15 +114,14 @@ namespace shu {
         local_timer timers_;
         std::thread::id run_tid_;
 
-        // sloop_runable* 队列
+        // 带锁的队列（不支持cancel)
         std::mutex mutex_;
-        std::vector<func_t> tasks_;
+        std::vector<task_node_t> tasks_mux_;
         std::atomic_uint32_t tasks_count_;
+        std::atomic_uint64_t task_req_;
 
         // 内部的不需要加锁的队列
-        std::uint64_t task_req_;
-        std::vector<task_node_t>  task_nodes_;
-        std::unordered_set<std::uint64_t> cancels_;
+        std::vector<task_node_t>  taks_nmux_;
 
         int event_fd_;
         std::uint64_t event_fd_buf_;
@@ -170,7 +169,7 @@ namespace shu {
                 unsigned count = 0;
                 bool hasstop = false;
                 struct __kernel_timespec ts{};
-                if (task_nodes_.empty() && tasks_count_ == 0) {
+                if (taks_nmux_.empty() && tasks_count_ == 0) {
                     ts = timers_.timer_wait_leatest();
                 }
                 io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
@@ -221,14 +220,15 @@ namespace shu {
         }
 
         void post(func_t&& cb) {
-            shu::panic(ring.ring_fd != -1);
-            {
-                std::lock_guard<std::mutex> guard(mutex_);
-                tasks_.emplace_back(std::forward<func_t>(cb));
-            }
             tasks_count_ ++;
-
-            if(run_tid_ != std::this_thread::get_id()) {
+            if (run_tid_ == std::this_thread::get_id()) {
+                post_inloop(std::forward<func_t>(cb));
+            } else {
+                auto id = task_req_++;
+                {
+                    std::lock_guard<std::mutex> guard(mutex_);
+                    tasks_mux_.emplace_back(task_node_t{.cb = std::forward<func_t>(cb), .id = id});
+                }
                 wakeup();
             }
         }
@@ -243,12 +243,8 @@ namespace shu {
 
         auto post_inloop(func_t&& cb) -> std::uint64_t {
             auto id = task_req_++;
-            task_nodes_.emplace_back(task_node_t{.cb = std::forward<func_t>(cb), .id = id});
+            taks_nmux_.emplace_back(task_node_t{.cb = std::forward<func_t>(cb), .id = id});
             return id;
-        }
-
-        auto cancel_post_inloop(std::uint64_t id) {
-            cancels_.insert(id);
         }
 
         void dispatch_inloop(func_t&& cb) {
@@ -296,25 +292,22 @@ namespace shu {
         }
 
         void on_tasks() {
-            std::vector<func_t> pendings;
+            std::vector<task_node_t> pendings;
             {
                 std::lock_guard guard(mutex_);
-                pendings.swap(tasks_);
+                pendings.swap(tasks_mux_);
             }
             for(auto& it:pendings) {
-                it();
+                it.cb();
             }
         
             tasks_count_ -= pendings.size();
 
             std::vector<task_node_t> pendings1;
-            pendings1.swap(task_nodes_);
+            pendings1.swap(taks_nmux_);
             for(auto& it:pendings1) {
-                if (!cancels_.count(it.id)) {
-                    it.cb();
-                }
+                it.cb();
             }
-            cancels_.clear();
         }
         void on_stop() {
             timers_.stop_timer();
@@ -375,21 +368,6 @@ namespace shu {
 
     void sloop::dispatch(func_t&& cb){
         return loop_->dispatch(std::forward<func_t>(cb));
-    }
-
-    auto sloop::post_inloop(func_t&& f) -> std::uint64_t {
-        assert_thread();
-        return loop_->post_inloop(std::forward<func_t>(f));
-    }
-
-    void sloop::cancel_post_inloop(std::uint64_t id) {
-        assert_thread();
-        loop_->cancel_post_inloop(id);
-    }
-
-    void sloop::dispatch_inloop(func_t&& f) {
-        assert_thread();
-        loop_->dispatch_inloop(std::forward<func_t>(f));
     }
 
     auto sloop::add_timer(func_t&& cb, std::chrono::milliseconds time) -> sloop_timer_t_id {

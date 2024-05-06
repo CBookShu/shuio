@@ -152,7 +152,7 @@ namespace shu {
 
         // 自定义函数队列
         std::mutex mutex_;
-        std::vector< func_t> tasks_;
+        std::vector< func_t> tasks_mux_;
         std::atomic_uint32_t taskcount_;
 
         std::any ud_;
@@ -254,7 +254,7 @@ namespace shu {
             shu::panic(iocp != INVALID_HANDLE_VALUE);
             {
                 std::lock_guard<std::mutex> guard(mutex_);
-                tasks_.emplace_back(std::forward<func_t>(cb));
+                tasks_mux_.emplace_back(std::forward<func_t>(cb));
             }
 
             taskcount_++;
@@ -306,7 +306,7 @@ namespace shu {
             std::vector<func_t> pendings;
             {
                 std::lock_guard<std::mutex> guard(mutex_);
-                pendings.swap(tasks_);
+                pendings.swap(tasks_mux_);
             }
             for (auto& it : pendings) {
                 it();
@@ -327,7 +327,7 @@ namespace shu {
             std::vector<func_t> pendings;
             {
                 std::lock_guard<std::mutex> guard(mutex_);
-                pendings.swap(tasks_);
+                pendings.swap(tasks_mux_);
             }
             // 哪怕stop了，也把待执行的任务完成一下吧
             for (auto& it : pendings) {

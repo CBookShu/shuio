@@ -37,12 +37,6 @@ namespace shu {
 
 		void dispatch(func_t&& f);
 
-		auto post_inloop(func_t&& f) -> std::uint64_t;
-
-		void cancel_post_inloop(std::uint64_t id);
-
-		void dispatch_inloop(func_t&& f);
-
 		auto add_timer(func_t&&, std::chrono::milliseconds) -> sloop_timer_t_id;
 		auto cancel_timer(sloop_timer_t_id)->void;
 
