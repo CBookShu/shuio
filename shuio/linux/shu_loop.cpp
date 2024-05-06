@@ -13,6 +13,7 @@
 #include <map>
 #include <unordered_map>
 #include <vector>
+#include <unordered_set>
 
 namespace shu {
 
@@ -102,6 +103,11 @@ namespace shu {
         }
     };
 
+    struct task_node_t {
+        func_t cb;
+        std::uint64_t id;
+    };
+
     struct sloop::sloop_t : public uring_navite_t {
         local_timer timers_;
         std::thread::id run_tid_;
@@ -109,12 +115,18 @@ namespace shu {
         // sloop_runable* 队列
         std::mutex mutex_;
         std::vector<func_t> tasks_;
+        std::atomic_uint32_t tasks_count_;
+
+        // 内部的不需要加锁的队列
+        std::uint64_t task_req_;
+        std::vector<task_node_t>  task_nodes_;
+        std::unordered_set<std::uint64_t> cancels_;
 
         // 增加task running 标志，减轻post的负载
         bool wake_up_{false};
         bool task_running_{false};
 
-        sloop_t() {
+        sloop_t() : task_req_(0) {
             auto depths = {2048, 1024, 512, 256, 128};
             bool ok = false;
             for(auto& d:depths) {
@@ -144,7 +156,10 @@ namespace shu {
                 unsigned head;
                 unsigned count = 0;
                 bool hasstop = false;
-                auto ts = timers_.timer_wait_leatest();
+                struct __kernel_timespec ts{};
+                if (task_nodes_.empty() && tasks_count_ == 0) {
+                    ts = timers_.timer_wait_leatest();
+                }
                 io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
 
                 wake_up_ = true;
@@ -184,11 +199,7 @@ namespace shu {
         }
 
         void stop() {
-            io_uring_push_sqe(this, [&](io_uring* u){
-                auto* sqe = io_uring_get_sqe(u);
-                io_uring_sqe_set_data(sqe, reinterpret_cast<void*>(&tag_stop));
-                io_uring_submit(u);
-            });
+            
         }
 
         void wakeup() {
@@ -206,8 +217,7 @@ namespace shu {
                 tasks_.emplace_back(std::forward<func_t>(cb));
             }
 
-            if(run_tid_ != std::this_thread::get_id()
-                || !wake_up_) {
+            if(run_tid_ != std::this_thread::get_id()) {
                 wakeup();
             }
         }
@@ -218,6 +228,20 @@ namespace shu {
                 return;
             }
             post(std::forward<func_t>(cb));
+        }
+
+        auto post_inloop(func&& cb) -> std::uint64_t {
+            auto id = task_req_++;
+            task_nodes_.emplace(task_node_t{.cb = std::function<func_t>(cb), .id = id});
+            return id;
+        }
+
+        auto cancel_post_inloop(std::uint64_t id) {
+            cancels_.insert(id);
+        }
+
+        void dispatch_inloop(func&& cb) {
+            std::forward<func>(cb)();
         }
 
         auto add_timer(func_t&& cb, std::chrono::milliseconds time) -> sloop_timer_t_id {
@@ -270,6 +294,17 @@ namespace shu {
             for(auto& it:pendings) {
                 it();
             }
+        
+            tasks_count_ -= pendings.size();
+
+            std::vector<task_node_t> pendings1;
+            pendings1.swap(task_nodes_);
+            for(auto& it:pendings1) {
+                if (!cancels_.count(it.id)) {
+                    it.cb();
+                }
+            }
+            cancels_.clear();
             task_running_ = false;
         }
         void on_stop() {
@@ -277,14 +312,7 @@ namespace shu {
             io_uring_queue_exit(&ring);
             ring.ring_fd = -1;
 
-            std::vector<func_t> pendings;
-            {
-                std::lock_guard guard(mutex_);
-                pendings.swap(tasks_);
-            }
-            for(auto& it:pendings) {
-                it();
-            }
+            on_tasks();
         }
 
         void check_thread(std::source_location call) {
@@ -314,6 +342,21 @@ namespace shu {
 
     void sloop::dispatch(func_t&& cb){
         return loop_->dispatch(std::forward<func_t>(cb));
+    }
+
+    auto sloop::post_inloop(func_t&& f) -> std::uint64_t {
+        assert_thread();
+        return loop_->post_inloop(std::forward<func_t>(f));
+    }
+
+    void sloop::cancel_post_inloop(std::uint64_t id) {
+        assert_thread();
+        loop_->cancel_post_inloop(id);
+    }
+
+    void sloop::dispatch_inloop(func_t&& f) {
+        assert_thread();
+        loop_->dispatch_inloop(std::forward<func_t>(f));
     }
 
     auto sloop::add_timer(func_t&& cb, std::chrono::milliseconds time) -> sloop_timer_t_id {
