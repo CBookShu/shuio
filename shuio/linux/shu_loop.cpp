@@ -126,6 +126,8 @@ namespace shu {
         int event_fd_;
         std::uint64_t event_fd_buf_;
 
+        std::any ud_;
+
         sloop_t() 
         : run_tid_(std::this_thread::get_id()),task_req_(0) 
         {
@@ -170,7 +172,8 @@ namespace shu {
                 unsigned count = 0;
                 bool hasstop = false;
                 struct __kernel_timespec ts{};
-                if (taks_nmux_.empty() && tasks_count_ == 0) {
+                bool nowait = tasks_mux_.size() > 0 || tasks_count_ > 0;
+                if (!nowait) {
                     ts = timers_.timer_wait_leatest();
                 }
                 io_uring_wait_cqe_timeout(&ring, &cqe, &ts);
@@ -357,6 +360,11 @@ namespace shu {
         if(loop_) {
             delete loop_;
         }
+    }
+
+    auto sloop::get_ud() -> std::any* {
+        shu::panic(loop_);
+        return &loop_->ud_;
     }
 
     auto sloop::handle() -> sloop_t* {
