@@ -126,7 +126,9 @@ namespace shu {
         int event_fd_;
         std::uint64_t event_fd_buf_;
 
-        sloop_t() : task_req_(0) {
+        sloop_t() 
+        : run_tid_(std::this_thread::get_id()),task_req_(0) 
+        {
             auto depths = {2048, 1024, 512, 256, 128};
             bool ok = false;
             for(auto& d:depths) {
@@ -140,15 +142,14 @@ namespace shu {
                 break;
             }
             shu::panic(ok, "liuring init faild");
-            run_tid_ = std::this_thread::get_id();
 
             if(event_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC); event_fd_ == -1) {
                 shu::panic(false, std::string("eventfd:") + std::to_string(s_last_error()));
             }
 
-            if (int r = io_uring_register_eventfd(&ring, event_fd_); r != 0) {
-                shu::panic(false, std::string("io_uring_register_eventfd:") + std::to_string(r));
-            }
+            // if (int r = io_uring_register_eventfd(&ring, event_fd_); r != 0) {
+            //     shu::panic(false, std::string("io_uring_register_eventfd:") + std::to_string(r));
+            // }
         }
         ~sloop_t() {
             if (ring.ring_fd != -1) {
@@ -324,7 +325,7 @@ namespace shu {
             shu::panic(event_fd_ != -1);
             auto* sqe = io_uring_get_sqe(&ring);
             io_uring_prep_poll_add(sqe, event_fd_, POLLIN);
-             io_uring_sqe_set_data(sqe, &event_fd_);
+            io_uring_sqe_set_data(sqe, &event_fd_);
             io_uring_submit(&ring);
         }
 

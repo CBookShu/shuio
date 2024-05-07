@@ -194,7 +194,14 @@ static void loop_post() {
 
 int main(int argc, char**argv)
 {
-    loop_post();
+    // loop_post();
+    sloop l;
+    std::thread t([&]{
+        this_thread::sleep_for(1s);
+        l.post([]{});
+    });
+    l.run();
+    t.join();
     return 0;
 }
 
