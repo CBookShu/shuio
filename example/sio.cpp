@@ -198,8 +198,13 @@ int main(int argc, char**argv)
     sloop l;
     std::thread t([&]{
         this_thread::sleep_for(1s);
-        l.post([]{});
+        l.post([]{std::cout << "no in loop" << std::endl;});
     });
+    l.post([]{ std::cout << "in loop" << std::endl;});
+    l.post([]{ std::cout << "in loop" << std::endl;});
+    l.post([]{ std::cout << "in loop" << std::endl;});
+    l.post([]{ std::cout << "in loop" << std::endl;});
+    l.post([]{ std::cout << "in loop" << std::endl;});
     l.run();
     t.join();
     return 0;

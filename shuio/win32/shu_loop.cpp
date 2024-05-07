@@ -144,25 +144,34 @@ namespace shu {
         }
     };
 
+    struct task_node_t {
+        func_t cb;
+        std::uint64_t id;
+    };
+
     struct sloop::sloop_t : iocp_navite_t {
         std::thread::id run_tid_;
 
         // 定时器
         win32_timer timers_;
 
-        // 自定义函数队列
+       // 带锁的队列
         std::mutex mutex_;
-        std::vector< func_t> tasks_mux_;
-        std::atomic_uint32_t taskcount_;
+        std::vector< task_node_t> tasks_mux_;
+        std::atomic_uint32_t tasks_count_;
+        std::atomic_uint64_t task_req_;
+
+        // 内部的不需要加锁的队列
+        std::vector<task_node_t>  taks_nmux_;
 
         std::any ud_;
 
-        sloop_t() {
+        sloop_t() 
+        : run_tid_(std::this_thread::get_id()),tasks_count_(0),task_req_(0)
+        {
             iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
             shu::panic(iocp != INVALID_HANDLE_VALUE,
                 std::format("Bad Create Error:{}", WSAGetLastError()));
-
-            run_tid_ = std::this_thread::get_id();
         }
         ~sloop_t() {
             // 如果run了，那么肯定要先退出run，才能析构
@@ -189,12 +198,13 @@ namespace shu {
             std::vector<OVERLAPPED_ENTRY> overlappeds(1024);
             ULONG count;
             for (;;) {
+                bool nowait = tasks_mux_.size() > 0 || tasks_count_ > 0;
                 BOOL r = ::GetQueuedCompletionStatusEx(
                     iocp,
                     overlappeds.data(),
                     overlappeds.size(),
                     &count,
-                    taskcount_ > 0 ? 0 : INFINITE,
+                    nowait  ? 0 : INFINITE,
                     false);
                 if (!r) {
                     // timeout?
@@ -251,14 +261,14 @@ namespace shu {
         }
 
         void post(func_t&& cb) {
-            shu::panic(iocp != INVALID_HANDLE_VALUE);
-            {
-                std::lock_guard<std::mutex> guard(mutex_);
-                tasks_mux_.emplace_back(std::forward<func_t>(cb));
-            }
-
-            taskcount_++;
-            if (run_tid_ != std::this_thread::get_id()) {
+            tasks_count_ ++;
+            if (run_tid_ == std::this_thread::get_id()) {
+                post_inloop(std::forward<func_t>(cb));
+            } else {
+                {
+                    std::lock_guard<std::mutex> guard(mutex_);
+                    tasks_mux_.emplace_back(std::forward<func_t>(cb));
+                }
                 // 应该永远不应该失败,哪怕失败了，也无所谓，tasks_ 会负责回收 cb
                 BOOL res = ::PostQueuedCompletionStatus(iocp, 0, reinterpret_cast<ULONG_PTR>(&tag_wake), nullptr);
             }
@@ -270,6 +280,16 @@ namespace shu {
                 return;
             }
             post(std::forward<func_t>(cb));
+        }
+
+        auto post_inloop(func_t&& cb) -> std::uint64_t {
+            auto id = task_req_++;
+            taks_nmux_.emplace_back(task_node_t{.cb = std::forward<func_t>(cb), .id = id});
+            return id;
+        }
+
+        void dispatch_inloop(func_t&& cb) {
+            std::forward<func_t>(cb)();
         }
 
         auto add_timer(func_t&& cb, std::chrono::milliseconds time) -> sloop_timer_t_id {
@@ -303,38 +323,34 @@ namespace shu {
         }
 
         void on_tasks() {
-            std::vector<func_t> pendings;
-            {
-                std::lock_guard<std::mutex> guard(mutex_);
-                pendings.swap(tasks_mux_);
-            }
-            for (auto& it : pendings) {
-                it();
-            }
-            taskcount_-= pendings.size();
-        }
-
-        void on_start() {
-            timers_.start_timer([&] {
-                ::PostQueuedCompletionStatus(iocp, 0, reinterpret_cast<ULONG_PTR>(&tag_timer), nullptr);
-            });
-            taskcount_ = 0;
-        }
-
-        void on_stop() {
-            timers_.stop_timer();
-
-            std::vector<func_t> pendings;
+            std::vector<task_node_t> pendings;
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 pendings.swap(tasks_mux_);
             }
             // 哪怕stop了，也把待执行的任务完成一下吧
             for (auto& it : pendings) {
-                it();
+                it.cb();
             }
-            taskcount_ -= pendings.size();
-            shu::panic(taskcount_ == 0);
+            tasks_count_ -= pendings.size();     
+
+            std::vector<task_node_t> pendings1;
+            pendings1.swap(taks_nmux_);
+            for(auto& it:pendings1) {
+                it.cb();
+            }
+        }
+
+        void on_start() {
+            timers_.start_timer([&] {
+                ::PostQueuedCompletionStatus(iocp, 0, reinterpret_cast<ULONG_PTR>(&tag_timer), nullptr);
+            });
+        }
+
+        void on_stop() {
+            timers_.stop_timer();
+
+            on_tasks();
         }
 
         void check_thread(std::source_location call) {
