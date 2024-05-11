@@ -34,6 +34,13 @@ target("pingpong_client")
     set_kind("binary")
     add_deps("shuio")
     add_files("example/pingpong/client.cpp")
+
+-- wrk -t4 -c1000 -d30s --latency http://127.0.0.1:8888
+target("bench_http_wrk")
+    set_kind("binary")
+    add_deps("shuio")
+    add_files("example/bench_http_wrk/*.cpp")
+
 --
 -- If you want to known more usage about xmake, please see https://xmake.io
 --

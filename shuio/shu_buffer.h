@@ -11,12 +11,12 @@ namespace shu {
 	// cast to WSABUF
 	typedef struct buffer_t {
 		unsigned long size;
-		char* p;
+		const char* p;
 	} buffer_t;
 #else
 	// cast to struct iovec 
 	typedef struct buffer_t {
-		char* p;
+		const char* p;
   		size_t size;
 	} buffer_t;
 #endif
