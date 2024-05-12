@@ -35,6 +35,7 @@ namespace shu {
             if (std::exchange(close_, true)) {
                 return;
             }
+            util_loop_register::unregister_loop(loop_, sock_.get());
             if (cb_ctx_.evClose) {
                 loop_->post([f = std::move(cb_ctx_.evClose), owner = owner_](){
                     f(owner);
@@ -62,7 +63,7 @@ namespace shu {
             sock_->reuse_addr(true);
 			sock_->noblock(true);
 
-            navite_fd_setcallback(sock_.get(), [this](io_uring_cqe* cqe){
+            util_loop_register::register_loop_cb(loop_, sock_.get(), [this](int id, io_uring_cqe* cqe){
                 run(cqe);
             });
             return post_accept();
@@ -75,7 +76,7 @@ namespace shu {
                 
                 socklen_t len = addr_acceptr_.ss_family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
                 io_uring_prep_accept(sqe, navie_sock->fd, (struct sockaddr*)&addr_acceptr_, &len, 0);
-                io_uring_sqe_set_data(sqe, &navie_sock->tag);
+                io_uring_sqe_set_data64(sqe, util_loop_register::ud_pack(sock_.get(), 0));
                 io_uring_submit(ring);
             });
 
@@ -124,7 +125,7 @@ namespace shu {
                 io_uring_push_sqe(loop_, [&](io_uring* ring){
                     auto* navie_sock = navite_cast_ssocket(sock_.get());
                     struct io_uring_sqe *read_sqe = io_uring_get_sqe(ring);
-                    io_uring_prep_cancel(read_sqe, &navie_sock->tag, 0);
+                    io_uring_prep_cancel64(read_sqe, util_loop_register::ud_pack(sock_.get(), 0), 0);
                     io_uring_submit(ring);
                 });
             } else {

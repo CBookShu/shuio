@@ -18,7 +18,7 @@ class tcp_server {
     int stream_req_;
 public:
     tcp_server(sloop& loop, addr_storage_t addr) 
-    :loop_(loop),stream_req_(0)
+    :loop_(loop),stream_req_(0),servererr_(false)
     {
         auto ok = server_.start(&loop_, {
             .evClose = [&loop](sacceptor*){
@@ -42,18 +42,26 @@ public:
 
         std::unique_ptr<ssocket> ptr(sock);
         if (res.res <= 0) {
-            std::cout << "tcp server err:" << strerror(-res.res) << std::endl;
-            server_.stop();
+            printf("tcp server err:%d,%s \r\n", res.res, strerror(-res.res));
+            servererr_ = true;
+            for(auto& con:cons_) {
+                con.second->stop();
+            }
             return;
         }
-
+        servererr_ = true;
         auto stream_ptr = std::make_unique<sstream>();
         int stream_req = ++stream_req_;
         // fprintf(stdout, "stream new %d \r\n", stream_req);
         stream_ptr->start(&loop_, ptr.release(), {.addr = addr}, {
-            .evClose = [stream_req](sstream* s){
+            .evClose = [stream_req, this](sstream* s){
                 // fprintf(stderr, "stream req:%d ~ \r\n", stream_req);
                 delete s;
+
+                this->cons_.erase(stream_req);
+                if (this->cons_.empty() && this->servererr_) {
+                    this->server_.stop();
+                }
             }
         });
         
@@ -62,6 +70,8 @@ public:
             // fprintf(stdout, "stream on_read %d, %d \r\n", stream_req, res.res);
             on_read(stream_req, s, res, bufs);
         });
+
+        cons_[stream_req] = p;
     }
     
     void on_read(int stream_req, sstream* s, socket_io_result_t res, buffers_t buf) {
@@ -88,7 +98,8 @@ public:
 private:
     sloop& loop_;
     sacceptor server_;
-    std::pmr::unsynchronized_pool_resource pool_;
+    std::unordered_map<int, sstream*> cons_;
+    bool servererr_;
 };
 
 int main() {

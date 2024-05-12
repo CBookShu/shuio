@@ -15,11 +15,11 @@ namespace shu {
         std::unique_ptr<ssocket> sock_;
         stream_ctx_t cb_ctx_;
         
-        io_uring_task_union read_complete_;
+        static constexpr int read_event_id_ = 0;
         func_on_read_t on_read_cb_;
         func_alloc_t on_alloc_cb_;
 
-        io_uring_task_union write_complete_;
+        static constexpr int write_event_id_ = 1;
         func_on_write_t on_write_cb_;
 
         bool stop_;
@@ -41,6 +41,7 @@ namespace shu {
                 return;
             }
             sock_->shutdown();
+            util_loop_register::unregister_loop(loop_, sock_.get());
             if (cb_ctx_.evClose) {
                 loop_->post([f = std::move(cb_ctx_.evClose), owner=owner_](){
                     f(owner);
@@ -49,14 +50,15 @@ namespace shu {
         }
 
         int start() {
-            read_complete_ = io_uring_socket_t();
-            std::get_if<io_uring_socket_t>(&read_complete_)->cb = [this](io_uring_cqe* cqe){
-                run_read(cqe);
-            };
-            write_complete_ = io_uring_socket_t{};
-            std::get_if<io_uring_socket_t>(&write_complete_)->cb = [this](io_uring_cqe* cqe){
-                run_write(cqe);
-            };
+            util_loop_register::register_loop_cb(loop_, sock_.get(), [this](int eventid, io_uring_cqe* cqe){
+                if (eventid == read_event_id_) {
+                    run_read(cqe);
+                } else if (eventid == write_event_id_) {
+                    run_write(cqe);
+                } else [[unlikely]] {
+                    shu::panic(false);
+                }
+            });
             return 1;
         }
 
@@ -89,7 +91,7 @@ namespace shu {
                 struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
                 
                 io_uring_prep_writev(sqe, sock->fd, reinterpret_cast<iovec*>(bufs.data()), bufs.size(), 0);
-                io_uring_sqe_set_data(sqe, &write_complete_);
+                io_uring_sqe_set_data64(sqe, util_loop_register::ud_pack(sock_.get(), write_event_id_));
                 io_uring_submit(ring);
             });
 
@@ -104,7 +106,7 @@ namespace shu {
                 struct io_uring_sqe* sqe = io_uring_get_sqe(ring);
                 auto* sock = navite_cast_ssocket(sock_.get());
                 io_uring_prep_recv(sqe, sock->fd, nullptr, 0, 0);
-                io_uring_sqe_set_data(sqe, &read_complete_);
+                io_uring_sqe_set_data64(sqe, util_loop_register::ud_pack(sock_.get(), read_event_id_));
                 io_uring_submit(ring);
             });
             return 1;
@@ -180,7 +182,7 @@ namespace shu {
                 io_uring_push_sqe(loop_, [&](io_uring* ring){
                     auto* navie_sock = navite_cast_ssocket(sock_.get());
                     struct io_uring_sqe *read_sqe = io_uring_get_sqe(ring);
-                    io_uring_prep_cancel(read_sqe, &read_complete_, 0);
+                    io_uring_prep_cancel64(read_sqe, util_loop_register::ud_pack(sock_.get(), read_event_id_), 0);
                     io_uring_submit(ring);
                 });
             } else {

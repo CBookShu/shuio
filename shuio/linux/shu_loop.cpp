@@ -51,6 +51,7 @@ namespace shu {
             std::vector< timer_node> runs;
             timer_node tmp;
             tmp.id.expire = now;
+            tmp.id.id = timerseq.load(std::memory_order::relaxed);
 			auto it = std::upper_bound(timers.begin(), timers.end(), tmp);
             runs.assign(timers.begin(), it);
 			// !! 这里哪怕runs是空的，也要重新再定时一次！
@@ -123,13 +124,17 @@ namespace shu {
         // 内部的不需要加锁的队列
         std::vector<task_node_t>  taks_nmux_;
 
+        static constexpr int event_id_stop_ = 1;
+        static constexpr int event_id_efd_ = 2;
+        __u64 register_id_;
+
         int event_fd_;
         std::uint64_t event_fd_buf_;
 
         std::any ud_;
 
         sloop_t() 
-        : run_tid_(std::this_thread::get_id()),task_req_(0) 
+        : run_tid_(std::this_thread::get_id()),task_req_(0),register_id_(make_register_id())
         {
             auto depths = {2048, 1024, 512, 256, 128};
             bool ok = false;
@@ -187,25 +192,23 @@ namespace shu {
                     if(cqe->user_data == 0) {
                         continue;
                     }
-
-                    if((void*)cqe->user_data == &event_fd_) {
-                        handle_eventfd();
-                        post_read_eventfd();
-                        continue;
-                    }
                     
-                    io_uring_task_union* ud = reinterpret_cast<io_uring_task_union*>(cqe->user_data);
-                    std::visit
-                    (
-                        overload
-                        (
-                            [&](io_uring_timer_t&) {},
-                            [&](io_uring_stop_t&) {hasstop = true; },
-                            [&](io_uring_wake_t& arg) {},
-                            [&](io_uring_socket_t& arg) { arg.cb(cqe); }
-                        ),
-                        *ud
-                    );
+                    auto [rid,event_id] = util_loop_register::ud_parse(cqe->user_data);
+                    if (rid == register_id_) {
+                        // loop system event
+                        if (event_id == event_id_efd_) {
+                            handle_eventfd();
+                            post_read_eventfd();
+                        } else if(event_id == event_id_stop_) {
+                            hasstop = true;
+                        }
+                    } else {
+                        // user event
+                        if (auto it = register_cb.find(rid); it != register_cb.end()) {
+                            it->second(event_id, cqe);
+                        }
+                    }
+
                 }
                 io_uring_cq_advance(&ring, count);
 
@@ -220,7 +223,13 @@ namespace shu {
         }
 
         void stop() {
-            
+            dispatch([this](){
+                io_uring_push_sqe(this, [&](io_uring* u){
+                    auto* sqe = io_uring_get_sqe(u);
+                    io_uring_sqe_set_data64(sqe, util_loop_register::ud_pack(register_id_, event_id_stop_));
+                    io_uring_submit(u);
+                });
+            });
         }
 
         void post(func_t&& cb) {
@@ -328,7 +337,7 @@ namespace shu {
             shu::panic(event_fd_ != -1);
             auto* sqe = io_uring_get_sqe(&ring);
             io_uring_prep_poll_add(sqe, event_fd_, POLLIN);
-            io_uring_sqe_set_data(sqe, &event_fd_);
+            io_uring_sqe_set_data64(sqe, util_loop_register::ud_pack(register_id_, event_id_efd_));
             io_uring_submit(&ring);
         }
 

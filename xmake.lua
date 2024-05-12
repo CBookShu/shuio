@@ -8,18 +8,27 @@ add_rules("mode.debug", "mode.release")
 
 set_languages("c++20")
 
+-- ASAN_SYMBOLIZER_PATH=$(which llvm-symbolizer) ./bench_http_wrk
+if is_mode("release") and not is_os("windows") then
+    -- set_optimize("faster")
+    add_cxxflags("-g")
+    add_cxxflags("-fsanitize=address")
+    add_cxxflags("-fno-omit-frame-pointer")
+end
+
 target("shuio")
     set_kind("static")
     add_includedirs("$(projectdir)", {public = true})
     if is_os("windows") then
         add_files("shuio/win32/*.cpp")
     elseif is_os("linux") then
+        add_links("asan")
         add_links("uring")
         add_files("shuio/linux/*.cpp")
     else
         assert(false, "not support")
     end
-    
+
 target("example")
     set_kind("binary")
     add_deps("shuio")
@@ -38,6 +47,9 @@ target("pingpong_client")
 -- wrk -t4 -c1000 -d30s --latency http://127.0.0.1:8888
 target("bench_http_wrk")
     set_kind("binary")
+    if is_os("linux") then
+        add_links("asan")
+    end
     add_deps("shuio")
     add_files("example/bench_http_wrk/*.cpp")
 
