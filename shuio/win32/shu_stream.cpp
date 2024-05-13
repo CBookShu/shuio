@@ -122,15 +122,26 @@ namespace shu {
 			buf.len = 0;
 			reader_.zero_op();
 			int r = ::WSARecv(navite_sock->s, &buf, 1, &dwBytes, &dwFlags, &reader_, nullptr);
+
+			reader_.running = true;
 			if (r == SOCKET_ERROR) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
+					reader_.running = false;
+
 					socket_io_result_t res{ .res = -e };
 					reader_.on_read_cb(owner_, res, buffers_t{});
 					return -e;
 				}
+			} else {
+				OVERLAPPED_ENTRY entry;
+				entry.dwNumberOfBytesTransferred = dwBytes;
+				entry.Internal = 0;
+				entry.lpCompletionKey = reinterpret_cast<ULONG_PTR>(&navite_sock->tag);
+				entry.lpOverlapped = &reader_;
+				run_read(this, &entry);
+				return 1;
 			}
-			reader_.running = true;
 			return 1;
 		}
 
@@ -144,30 +155,31 @@ namespace shu {
 			writer_.zero_op();
 			int r = ::WSASend(navite_sock->s, reinterpret_cast<WSABUF*>(bufs.data()), static_cast<DWORD>(bufs.size()), &dwBytes, dwFlags, &writer_, nullptr);
 			
+			writer_.running = true;
 			if (r == SOCKET_ERROR) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
+					writer_.running = false;
+
 					socket_io_result_t res{ .res = -e };
 					std::forward<func_on_write_t>(cb)(owner_, res);
 					return false;
 				}
 			} else {
-				socket_io_result_t res{ .res = static_cast<int>(dwBytes)};
-				std::forward<func_on_write_t>(cb)(owner_, res);
+				writer_.set(std::forward<func_on_write_t>(cb));
 
-				// 现在的write 在一定情况下，会直接成功，可能会漏掉stop 的机会
-				if (stop_
-				&& !reader_.running 
-				&& !writer_.running ) {
-					post_to_close();
-				}
+				OVERLAPPED_ENTRY entry;
+				entry.dwNumberOfBytesTransferred = dwBytes;
+				entry.Internal = 0;
+				entry.lpCompletionKey = reinterpret_cast<ULONG_PTR>(&navite_sock->tag);
+				entry.lpOverlapped = &writer_;
+				run_write(this, &entry);
 				return true;
 			}
-			writer_.set(std::forward<func_on_write_t>(cb));
-			writer_.running = true;
 			return true;
 		}
 
+		
 		void static run_read(sstream::sstream_t* self, OVERLAPPED_ENTRY* entry) {
 			self->reader_.running = false;
 			socket_io_result_t res;
