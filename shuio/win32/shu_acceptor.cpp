@@ -106,22 +106,32 @@ namespace shu {
 			auto* client_sock = navite_cast_ssocket(acceptor->sock_.get());
 			auto* server_sock = navite_cast_ssocket(sock_.get());
 			DWORD bytes_read = 0;
-			auto r = win32_extension_fns::AcceptEx(
+			BOOL r = win32_extension_fns::AcceptEx(
 				server_sock->s,
 				client_sock->s,
 				acceptor->buffer_, 0,
 				sizeof(sockaddr) + 16, sizeof(sockaddr) + 16,
 				&bytes_read, acceptor);
 
+			acceptor->doing_ = true;
 			if (!r) {
 				auto e = s_last_error();
 				if (e != WSA_IO_PENDING) {
+					acceptor->doing_ = false;
+
 					socket_io_result_t res{ .res = -e };
 					server_ctx_.evConn(owner_, res, nullptr, addr_pair_);
 					return res.res;
 				}
+			} else {
+				OVERLAPPED_ENTRY entry;
+				entry.dwNumberOfBytesTransferred = bytes_read;
+				entry.Internal = 0;
+				entry.lpCompletionKey = reinterpret_cast<ULONG_PTR>(&server_sock->tag);
+				entry.lpOverlapped = acceptor;
+				run(&entry);
+				return 1;
 			}
-			acceptor->doing_ = true;
 			return 1;
 		}
 
@@ -188,7 +198,6 @@ namespace shu {
 			for (auto& op : accept_ops) {
 				if(op.doing_) {
 					::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &op);
-					op.sock_.reset();
 					cancel = true;
 				}
 			}

@@ -78,6 +78,14 @@ namespace shu {
                     cb_ctx_.evConn(res, nullptr, addr_pair_);
                     return res.res;
                 }
+            } else {
+                OVERLAPPED_ENTRY entry;
+				entry.dwNumberOfBytesTransferred = dwBytes;
+				entry.Internal = 0;
+				entry.lpCompletionKey = reinterpret_cast<ULONG_PTR>(&navite_sock->tag);
+				entry.lpOverlapped = &connector_;
+				run(&entry);
+				return true;
             }
             return true;
         }
