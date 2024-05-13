@@ -226,6 +226,7 @@ namespace shu {
             dispatch([this](){
                 io_uring_push_sqe(this, [&](io_uring* u){
                     auto* sqe = io_uring_get_sqe(u);
+                    io_uring_prep_nop(sqe);
                     io_uring_sqe_set_data64(sqe, util_loop_register::ud_pack(register_id_, event_id_stop_));
                     io_uring_submit(u);
                 });
