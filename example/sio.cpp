@@ -199,6 +199,8 @@ int main(int argc, char**argv)
     std::thread t([&]{
         this_thread::sleep_for(1s);
         l.post([]{std::cout << "no in loop" << std::endl;});
+        this_thread::sleep_for(1s);
+        l.post([&]{ l.stop();});
     });
     l.post([]{ std::cout << "in loop" << std::endl;});
     l.post([]{ std::cout << "in loop" << std::endl;});
@@ -207,6 +209,7 @@ int main(int argc, char**argv)
     l.post([]{ std::cout << "in loop" << std::endl;});
     l.run();
     t.join();
+    shu::panic(false);
     return 0;
 }
 
