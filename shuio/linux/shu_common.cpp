@@ -16,20 +16,21 @@ namespace shu {
 	void panic(bool con,std::string_view msg, std::source_location call) noexcept {
 		if (!con) [[unlikely]] {
 			auto path = std::filesystem::path(call.file_name());
-			std::stringstream ss;
+			char buff[1024];
 			if (msg.empty()) {
-				std::cerr << "Panic" << std::endl
-				<< " @file:" << path.filename().string() << std::endl
-				<< " @line:" << call.line() << std::endl
-				<< " @func:" << call.function_name();
+				snprintf(buff, sizeof(buff)-1, "Panic %s:%d %s", 
+					path.filename().string().c_str(),
+					call.line(),
+					call.function_name());
 			}
 			else {
-				std::cerr << "Panic" << std::endl
-				<< " @msg:" << msg << std::endl
-				<< " @file:" << path.filename().string() << std::endl
-				<< " @line:" << call.line() << std::endl
-				<< " @func:" << call.function_name();
+				snprintf(buff, sizeof(buff)-1, "Panic %s %s:%d %s", 
+					msg.data(),
+					path.filename().string().c_str(),
+					call.line(),
+					call.function_name());
 			}
+			std::cerr << buff;
 			std::cerr << std::endl;
 
 			// C++23 std::unreachable()
