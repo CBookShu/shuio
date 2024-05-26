@@ -75,7 +75,7 @@ namespace shu {
                 }
             }
 
-            cb_ctx_.evConn(res, sock_.release(), addr_pair_);
+            cb_ctx_.evConn(res, std::move(sock_), addr_pair_);
 
             if(stop_) {
                 post_to_close();

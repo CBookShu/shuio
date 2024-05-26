@@ -29,8 +29,8 @@ namespace shu {
         
         std::any ud_;
 
-        sstream_t(sloop* loop, sstream* owner, ssocket* sock, sstream_opt opt, stream_ctx_t&& cb_ctx) 
-        : loop_(loop), owner_(owner),sock_(sock), opt_(opt), cb_ctx_(std::forward<stream_ctx_t>(cb_ctx)),
+        sstream_t(sloop* loop, sstream* owner, UPtr<ssocket> sock, sstream_opt opt, stream_ctx_t&& cb_ctx) 
+        : loop_(loop), owner_(owner),sock_(std::move(sock)), opt_(opt), cb_ctx_(std::forward<stream_ctx_t>(cb_ctx)),
         stop_(false), reading_(false), writing_(false), close_(false)
         {
             

@@ -107,7 +107,7 @@ namespace shu {
                 res.res = cqe->res;
             }
 
-            cb_ctx_.evConn(owner_, res, sock.release(), addr_pair_);
+            cb_ctx_.evConn(owner_, res, std::move(sock), addr_pair_);
 
             if (stop_) {
                 post_to_close();
