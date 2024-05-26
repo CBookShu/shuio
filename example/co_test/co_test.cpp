@@ -559,7 +559,6 @@ int main(int argc, char** argv) {
 
         for(;;) {
             auto sock = co_await svr.co_accept();
-            // std::cout << "new sock" << std::endl;
             if (!std::get<0>(sock)) {
                 break;
             }
@@ -571,7 +570,6 @@ int main(int argc, char** argv) {
         std::cout << "co final" << std::endl;
     };
     auto f = co_listen(&ctx);
-    // auto f = co_main(&ctx);
 
     loop.run();
     return 0;
