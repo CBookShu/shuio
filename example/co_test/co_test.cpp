@@ -3,6 +3,7 @@
 #include <variant>
 #include <assert.h>
 #include <optional>
+#include <list>
 
 #include "shuio/shuio.h"
 
@@ -415,7 +416,10 @@ struct co_session {
             if (parrent->err_ <= 0) return true;
             assert(!parrent->closed());
 
-            parrent->stream_.write(buffer_t{.size = (unsigned long)buf_.size(), .p = buf_.data()}, 
+            buffer_t buf;
+            buf.p = buf_.data();
+            buf.size = buf_.size();
+            parrent->stream_.write(buf, 
             [this](sstream* s,socket_io_result_t res){
                 if (res.res <= 0) {
                     parrent->err_ = res.res;
