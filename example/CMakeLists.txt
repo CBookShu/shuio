@@ -24,3 +24,8 @@ set_target_properties(pingpong_server PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(bench_http_wrk bench_http_wrk/bench_http_wrk.cpp)
 target_link_libraries(bench_http_wrk shuio)
 set_target_properties(bench_http_wrk PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}")
+
+#co_test
+add_executable(co_test co_test/co_test.cpp)
+target_link_libraries(co_test shuio)
+set_target_properties(co_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}")
