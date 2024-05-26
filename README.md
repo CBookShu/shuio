@@ -1,5 +1,5 @@
 # shuio
-    跨平台的异步io代码示例，支持win32(iocp)、linux(io_uring).
+    跨平台的异步io代码示例，支持win32(iocp)、linux(io_uring). 并提供了c++20 协程的结合示例(co_test)
     开发环境：
     windows: vs2022,c++20
     linux: wsl2(ubuntu 22.04.2),c++20
@@ -7,6 +7,7 @@
     shuio 定位的是更容易掌握的接口，用它可以比较稳定的组织IO 程序，并非是固定框架。shuio 的代码组织非常简单，跟原生裸写的性能差不多。
     此外,shuio 除了在linux上需要使用 liburing之外，没有任何依赖。非常容易部署、理解、修改。
     市面上大部分的IO 库或框架，都仅支持linux epoll，已经不新鲜了，于是这里使用uring，并且把win32 的iocp 也合并进来。
+    最近c++20 的协程非常火，于是也手写了一份协程的示例（对于异步代码来说，协程连贯的上下文给buffer的维护提供了非常大的帮助)。
 
 # 部署
 - windows依赖
@@ -20,21 +21,17 @@
 
 - 编译
 
-    1. xmake 安装 https://github.com/xmake-io/xmake.git
-        
-        cmd 或 PowerShell 中执行： xmake project -k cmake
-    
-    2.  cmake 编译
-        
-        cmake -B build -S .
-        
-        cmake --build build
-
+    1. Release
+    cmake -B build -S . -DCMAKE_BUILD_TYPE=Release   && cmake --build build -j32
+    2. Debug
+    cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug   && cmake --build build -j32
 
 ## 示例
     example中: 
     sio.cpp 是临时代码;
     pingpong 是一个pingpong 的测试用例
+    bench_http_wrk 是一个测试wrk 命令的压力测试代码
+    co_test 提供了一个简单的c++20 协程pingpong代码
 
 ## 设计思路
     所有基础类:

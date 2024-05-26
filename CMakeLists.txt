@@ -40,9 +40,9 @@ if(WIN32)
         shuio/win32/shu_buffer.cpp
     )
 
-    if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")  
+    if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")  
         set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
-    elseif(${CMAKE_BUILD_TYPE} STREQUAL "Release")  
+    elseif("${CMAKE_BUILD_TYPE}" STREQUAL "Release")  
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2")  
     endif()
 else()
@@ -66,9 +66,9 @@ else()
         shuio/linux/shu_buffer.cpp
     )
 
-    if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")  
+    if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")  
         set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
-    elseif(${CMAKE_BUILD_TYPE} STREQUAL "Release")  
+    elseif("${CMAKE_BUILD_TYPE}" STREQUAL "Release")  
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -g")  
     endif()
 endif(WIN32)
