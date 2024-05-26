@@ -538,7 +538,7 @@ int main(int argc, char** argv) {
     sloop loop;
     co_ctx_t ctx(&loop);
     
-    auto co_echo = [](co_ctx_t* ctx, UPtr<ssocket> sock) -> future_t<void> {
+    auto co_echo = [](co_ctx_t* ctx, UPtr<ssocket> sock, func_t f_del) -> future_t<void> {
         co_session session(ctx, std::move(sock));
         for(;;) {
             auto buf = co_await session.co_read();
@@ -549,13 +549,14 @@ int main(int argc, char** argv) {
             co_await session.co_write(buf);
         }
         co_await session.co_stop();
-        co_return;
+        co_return ctx->loop()->post(std::move(f_del));
     };
 
     auto co_listen = [&](co_ctx_t* ctx) -> future_t<void> {
 
         co_tcpserver svr{ctx, addr_storage_t{8888}};
-        std::list<future_t<void>> cons;
+        std::uint32_t req{0};
+        std::unordered_map<int, future_t<void>> cons;
 
         for(;;) {
             auto sock = co_await svr.co_accept();
@@ -563,7 +564,10 @@ int main(int argc, char** argv) {
                 break;
             }
 
-            cons.emplace_back(co_echo(ctx, std::move(std::get<0>(sock))));
+            int id = req++;
+            cons.emplace(id, co_echo(ctx, std::move(std::get<0>(sock)), [id,&cons](){
+                cons.erase(id);
+            }));
         }
 
         co_await svr.co_stop();
