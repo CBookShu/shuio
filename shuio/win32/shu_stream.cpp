@@ -57,9 +57,9 @@ namespace shu {
 
 		bool stop_;
 		bool close_;
-		sstream_t(sloop* loop, sstream* owner,ssocket* sock, sstream_opt opt, sstream::stream_ctx_t&& stream_event)
+		sstream_t(sloop* loop, sstream* owner,UPtr<ssocket> sock, sstream_opt opt, sstream::stream_ctx_t&& stream_event)
 			: loop_(loop), owner_(owner),
-			sock_(sock),opt_(opt),
+			sock_(std::move(sock)),opt_(opt),
 			reader_(run_read),writer_(run_write),
 			stream_ctx_(std::forward<sstream::stream_ctx_t>(stream_event)) ,
 			stop_(false),close_(false)
@@ -291,13 +291,13 @@ namespace shu {
 		return s_->loop_;
 	}
 
-	int sstream::start(sloop* l, ssocket* s, sstream_opt opt,
+	int sstream::start(sloop* l, UPtr<ssocket> sock, sstream_opt opt,
 		stream_ctx_t&& stream_event)
 	{
 		panic(!s_);
 		l->assert_thread();
 
-		s_ = new sstream_t(l, this, s, opt, std::forward<stream_ctx_t>(stream_event));
+		s_ = new sstream_t(l, this, std::move(sock), opt, std::forward<stream_ctx_t>(stream_event));
 		int r = s_->start();
 		return r;
 	}

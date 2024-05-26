@@ -37,7 +37,7 @@ namespace shu {
 
 		// just call once after new
 		int start(
-			sloop*, ssocket*, sstream_opt opt, 
+			sloop*, UPtr<ssocket>, sstream_opt opt, 
 			stream_ctx_t&& stream_event);
 
 		auto get_ud() -> std::any*;

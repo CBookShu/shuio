@@ -47,9 +47,9 @@ public:
         auto ok = server_.start(&loop_, {
             .evClose = [](sacceptor*){},
             .evConn = [this](sacceptor* a, socket_io_result_t res,
-                ssocket* sock,
+                UPtr<ssocket> sock,
                 addr_pair_t addr) {
-            on_client(res, sock, addr);}
+            on_client(res, std::move(sock), addr);}
         }, addr);
         shu::panic(ok);
     }
@@ -59,10 +59,9 @@ public:
     }
 
     void on_client(socket_io_result_t res,
-        ssocket* sock,
+        UPtr<ssocket> sock,
         addr_pair_t addr) {
 
-        std::unique_ptr<ssocket> ptr(sock);
         if (res.res <= 0) {
             std::cout << "tcp server err:" << strerror(-res.res) << std::endl;
             server_.stop();
@@ -71,7 +70,7 @@ public:
 
         auto stream_ptr = std::make_unique<sstream>();
 
-        stream_ptr->start(&loop_, ptr.release(), {.addr = addr}, {
+        stream_ptr->start(&loop_, std::move(sock), {.addr = addr}, {
             .evClose = [](sstream* s){
                 delete s;
             }
@@ -125,21 +124,21 @@ public:
     {
         auto r = client_.start(loop_, addr, {
             .evClose = [](sclient *) {},
-            .evConn = [this](socket_io_result res, ssocket* sock, const addr_pair_t& addr) {
-                on_client(res, sock, addr);
+            .evConn = [this](socket_io_result res, UPtr<ssocket> sock, const addr_pair_t& addr) {
+                on_client(res, std::move(sock), addr);
             }
         });
         shu::panic(r > 0);
     }
 
-    void on_client(socket_io_result res, ssocket* sock, const addr_pair_t& addr) {
+    void on_client(socket_io_result res, UPtr<ssocket> sock, const addr_pair_t& addr) {
         if (res.res <= 0) {
             client_.stop();
             return;
         }
 
         auto stream = std::make_unique<sstream>();
-        stream->start(loop_, sock, {.addr = addr}, {
+        stream->start(loop_, std::move(sock), {.addr = addr}, {
             .evClose = [](sstream* s){
                 delete s;
             },

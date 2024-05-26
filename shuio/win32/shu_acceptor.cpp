@@ -170,7 +170,7 @@ namespace shu {
 				op->sock_.reset();
 			}
 
-			server_ctx_.evConn(owner_, res, op->sock_.release(), addr);
+			server_ctx_.evConn(owner_, res, std::move(op->sock_), addr);
 
 			if (stop_) {
 				int left = 0;

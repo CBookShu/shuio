@@ -13,7 +13,7 @@ namespace shu {
         sclient_t* s_;
         S_DISABLE_COPY(sclient);
     public:
-        using func_connect_t = std::function<void(socket_io_result, ssocket*, const addr_pair_t&)>;
+        using func_connect_t = std::function<void(socket_io_result, UPtr<ssocket>, const addr_pair_t&)>;
         using func_close_t = std::function<void(sclient*)>;
 
         struct sclient_ctx {

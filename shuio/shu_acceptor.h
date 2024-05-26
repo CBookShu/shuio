@@ -16,7 +16,7 @@ namespace shu {
 		S_DISABLE_COPY(sacceptor);
 	public:
 		using func_newclient_t = \
-			std::function<void(sacceptor*, socket_io_result_t,ssocket*, const addr_pair_t&)>;
+			std::function<void(sacceptor*, socket_io_result_t, UPtr<ssocket>, const addr_pair_t&)>;
 		using func_close_t = std::function<void(sacceptor*)>;
 
 		struct event_ctx {

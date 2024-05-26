@@ -50,7 +50,8 @@ namespace shu {
 			std::string_view sip(storage->ip.data());
 			::inet_ntop(addr_common->ss_family, addr, storage->ip.data(), storage->ip.size());
 		} else {
-			shu::panic(false, std::string("error family:") + std::to_string(addr_common->ss_family));
+			storage->port = 0;	// 默认无效的值
+			// shu::panic(false, std::string("error family:") + std::to_string(addr_common->ss_family));
 		}
 	}
 

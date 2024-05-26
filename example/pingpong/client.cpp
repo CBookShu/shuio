@@ -34,8 +34,8 @@ public:
             .evClose = [this](sclient* ){
                 on_close();
             },
-            .evConn = [this](socket_io_result res, ssocket* s, const addr_pair_t& addr_pair){
-                on_connect(res, s, addr_pair);
+            .evConn = [this](socket_io_result res, UPtr<ssocket> s, const addr_pair_t& addr_pair){
+                on_connect(res,std::move(s), addr_pair);
             },
         });
     }
@@ -46,7 +46,7 @@ public:
         }
     }
 
-    void on_connect(socket_io_result res, ssocket* s, const addr_pair_t& addr_pair);
+    void on_connect(socket_io_result res, UPtr<ssocket> s, const addr_pair_t& addr_pair);
     void on_close();
 
     void on_read(socket_io_result_t res, buffers_t bufs) {
@@ -174,8 +174,7 @@ int main() {
     return 0;
 }
 
-void Session::on_connect(socket_io_result res, ssocket* s, const addr_pair_t& addr_pair)  {
-    auto sock_ptr = UPtr<ssocket>(s);
+void Session::on_connect(socket_io_result res, UPtr<ssocket> sock_ptr, const addr_pair_t& addr_pair)  {
     if (res.res <= 0) {
         client_.stop();
         return;
@@ -183,7 +182,7 @@ void Session::on_connect(socket_io_result res, ssocket* s, const addr_pair_t& ad
     owner_->onConnect();
 
     auto stream_ptr = std::make_unique<sstream>();
-    stream_ptr->start(loop_, sock_ptr.release(), {}, {
+    stream_ptr->start(loop_, std::move(sock_ptr), {}, {
         .evClose = [this](sstream* s) {
             on_close();
         }

@@ -99,7 +99,7 @@ namespace shu {
             }
             else {
                 socket_io_result res{ .res = 1 };
-                cb_ctx_.evConn(res, sock_.release(), addr_pair_);
+                cb_ctx_.evConn(res, std::move(sock_), addr_pair_);
             }
 
             if(stopping_) {

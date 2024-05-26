@@ -202,10 +202,10 @@ namespace shu {
         }
     }
 
-    int sstream::start(sloop* loop, ssocket* sock, sstream_opt opt, 
+    int sstream::start(sloop* loop, UPtr<ssocket> sock, sstream_opt opt, 
 			stream_ctx_t&& stream_event){
         shu::panic(!s_);
-        s_ = new sstream_t(loop, this, sock, opt, std::forward<stream_ctx_t>(stream_event));
+        s_ = new sstream_t(loop, this, std::move(sock), opt, std::forward<stream_ctx_t>(stream_event));
         return s_->start();
     }
 

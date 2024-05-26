@@ -22,9 +22,9 @@ public:
                 loop.stop();
             },
             .evConn = [this](sacceptor* a, socket_io_result_t res,
-                ssocket* sock,
+                UPtr<ssocket> sock,
                 addr_pair_t addr) {
-            on_client(res, sock, addr);}
+            on_client(res, std::move(sock), addr);}
         }, addr);
         shu::panic(ok > 0);
     }
@@ -34,10 +34,9 @@ public:
     }
 
     void on_client(socket_io_result_t res,
-        ssocket* sock,
+        UPtr<ssocket> sock,
         addr_pair_t addr) {
 
-        std::unique_ptr<ssocket> ptr(sock);
         if (res.res <= 0) {
             std::cout << "tcp server err:" << strerror(-res.res) << std::endl;
             server_.stop();
@@ -47,7 +46,7 @@ public:
         auto stream_ptr = std::make_unique<sstream>();
         int stream_req = ++stream_req_;
         // fprintf(stdout, "stream new %d \r\n", stream_req);
-        stream_ptr->start(&loop_, ptr.release(), {.addr = addr}, {
+        stream_ptr->start(&loop_, std::move(sock), {.addr = addr}, {
             .evClose = [stream_req](sstream* s){
                 // fprintf(stderr, "stream req:%d ~ \r\n", stream_req);
                 delete s;
