@@ -10,10 +10,10 @@
 #include <mutex>
 
 #include <algorithm>
+#include <ranges>
+#include <set>s
 
 namespace shu {
-
-
     using namespace std::chrono;
 
     using namespace shu;
@@ -38,10 +38,25 @@ namespace shu {
         }
     };
 
+    struct timer_id_hash {
+        std::size_t operator ()(const sloop_timer_t_id& id) const {
+            return std::hash<std::uint64_t>()(id.id);
+        }
+    };
+
+    struct timer_id_eque {
+        bool operator ()(const sloop_timer_t_id& l, const sloop_timer_t_id& r) const {
+            return std::tie(l.expire, l.id) == std::tie(r.expire, r.id);
+        }
+    };
+
+    constexpr auto timer_compare_func = std::greater<timer_node>();
+
     struct win32_timer {
         static constexpr std::chrono::microseconds max_expired_time = 5min;
         std::atomic_uint64_t timerseq{ 0 };
         std::vector<timer_node> timers;
+        std::set<sloop_timer_t_id> cancel_slots;
 
         std::jthread timer_thread;
         HANDLE win32_timer_handle = INVALID_HANDLE_VALUE;
@@ -85,21 +100,31 @@ namespace shu {
         }
         void timer_call() {
             auto now = steady_clock::now();
-            std::vector< timer_node> runs;
-            timer_node tmp;
-            tmp.id.expire = now;
-#undef max
-            tmp.id.id = std::numeric_limits<std::uint64_t>::max();
-            auto it = std::upper_bound(timers.begin(), timers.end(), tmp);
-            runs.assign(timers.begin(), it);
-            // !! 这里哪怕runs是空的，也要重新再定时一次！
-            // 因为timer的定时器和now的判断未必那么准确！
-            timers.erase(timers.begin(), timers.begin() + runs.size());
-            for (auto& r : runs) {
-                r.cb();
+            std::vector<func_t> runs;
+            while(!timers.empty()) {
+                if (timers.front().id.expire <= now) {
+                    if(cancel_slots.erase(timers.front().id) == 0) {
+                        runs.emplace_back(std::move(timers.front().cb));
+                    }
+                    std::pop_heap(timers.begin(), timers.end(), timer_compare_func);
+                    timers.pop_back();
+                } else {
+                    break;
+                }
             }
-            // 重新定时
-            _set_timer(now);
+            for(auto& cb:runs) {
+                cb();
+            }
+            if(!runs.empty()) {
+                _set_timer(now);
+            }
+            // cancel_slots 有时候会有冗余，比如删除已经执行过的timer
+            if (timers.empty()) {
+                cancel_slots.clear();
+            } else {
+                auto it = cancel_slots.upper_bound(timers.front().id);
+                cancel_slots.erase(cancel_slots.begin(), it);
+            }
         }
         void stop_timer() {
             stop = true;
@@ -110,6 +135,7 @@ namespace shu {
             ::CloseHandle(win32_timer_handle);
             win32_timer_handle = INVALID_HANDLE_VALUE;
             timers.clear();
+            cancel_slots.clear();
         }
         auto timer_get_seq() -> std::uint64_t {
             for (;;) {
@@ -133,14 +159,11 @@ namespace shu {
             timers.push_back(timer_node{
                 .id = id, .cb = std::forward<func_t>(cb)
                 });
-            std::sort(timers.begin(), timers.end());
+            std::push_heap(timers.begin(), timers.end(), timer_compare_func);
             _set_timer(now);
         }
         auto timer_erase(sloop_timer_t_id id) -> void {
-            auto it = std::equal_range(timers.begin(), timers.end(), id);
-            if (it.first == it.second) return;
-            timers.erase(it.first, it.second);
-            _set_timer(steady_clock::now());
+            cancel_slots.insert(id);
         }
     };
 

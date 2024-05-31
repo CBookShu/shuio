@@ -191,24 +191,27 @@ static void loop_post() {
     std::cout << "loop_post end" << std::endl;
 }
 
+template <typename F>
+static void test_f(F&& f) {
+    auto n1 = std::chrono::high_resolution_clock::now();
+    std::forward<F>(f)();
+    auto n2 = std::chrono::high_resolution_clock::now();
+    std::cout << "cost " << std::chrono::duration_cast<std::chrono::milliseconds>(n2 - n1).count() << std::endl;
+}
+
 int main(int argc, char**argv)
 {
     // loop_post();
     sloop l;
-    std::thread t([&]{
-        this_thread::sleep_for(1s);
-        l.post([]{std::cout << "no in loop" << std::endl;});
-        this_thread::sleep_for(1s);
-        l.post([&]{ l.stop();});
+    constexpr int count = 100000;
+    sloop_timer_t_id id;
+    test_f([&](){
+        for(auto i = 0; i < count; ++i) {
+            id = l.add_timer([](){}, 1ms * i);
+        }
     });
-    l.post([]{ std::cout << "in loop" << std::endl;});
-    l.post([]{ std::cout << "in loop" << std::endl;});
-    l.post([]{ std::cout << "in loop" << std::endl;});
-    l.post([]{ std::cout << "in loop" << std::endl;});
-    l.post([]{ std::cout << "in loop" << std::endl;});
+
     l.run();
-    t.join();
-    shu::panic(false);
     return 0;
 }
 
