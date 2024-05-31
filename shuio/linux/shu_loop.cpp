@@ -68,7 +68,7 @@ namespace shu {
             if (timers.empty()) {
                 cancel_slots.clear();
             } else {
-                auto it = cancel_slots.upper_bound(timers.front().id);
+                auto it = cancel_slots.lower_bound(timers.front().id);
                 cancel_slots.erase(cancel_slots.begin(), it);
             }
 		}
