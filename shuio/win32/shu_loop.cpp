@@ -38,18 +38,6 @@ namespace shu {
         }
     };
 
-    struct timer_id_hash {
-        std::size_t operator ()(const sloop_timer_t_id& id) const {
-            return std::hash<std::uint64_t>()(id.id);
-        }
-    };
-
-    struct timer_id_eque {
-        bool operator ()(const sloop_timer_t_id& l, const sloop_timer_t_id& r) const {
-            return std::tie(l.expire, l.id) == std::tie(r.expire, r.id);
-        }
-    };
-
     constexpr auto timer_compare_func = std::greater<timer_node>();
 
     struct win32_timer {
