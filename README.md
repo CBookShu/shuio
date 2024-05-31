@@ -22,11 +22,16 @@
 - 编译
 
     1. Release
-    cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-    cmake --build build --config=Release -j32
+        
+        cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+        cmake --build build --config=Release -j32
+
     2. Debug
-    cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
-    cmake --build build --config=Debug -j32
+        
+        cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
+    
+        cmake --build build --config=Debug -j32
 
 ## 示例
     example中: 
