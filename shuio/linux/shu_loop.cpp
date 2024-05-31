@@ -12,10 +12,8 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
-#include <map>
-#include <unordered_map>
 #include <vector>
-#include <unordered_set>
+#include <set>
 
 namespace shu {
 
@@ -41,28 +39,42 @@ namespace shu {
         }
     };
 
+    constexpr auto timer_compare_func = std::greater<timer_node>();
+
     struct local_timer {
         static constexpr std::chrono::microseconds max_expired_time = 5min;
 		std::atomic_uint64_t timerseq{ 0 };
 		std::vector<timer_node> timers;
+        std::set<sloop_timer_t_id> cancel_slots;
 
 		void timer_call() {
 			auto now = steady_clock::now();
-            std::vector< timer_node> runs;
-            timer_node tmp;
-            tmp.id.expire = now;
-            tmp.id.id = timerseq.load(std::memory_order::relaxed);
-			auto it = std::upper_bound(timers.begin(), timers.end(), tmp);
-            runs.assign(timers.begin(), it);
-			// !! 这里哪怕runs是空的，也要重新再定时一次！
-			// 因为timer的定时器和now的判断未必那么准确！
-			timers.erase(timers.begin(), timers.begin() + runs.size());
-			for (auto& r : runs) {
-				r.cb();
-			}
+            std::vector<func_t> runs;
+            while(!timers.empty()) {
+                if (timers.front().id.expire <= now) {
+                    if(cancel_slots.erase(timers.front().id) == 0) {
+                        runs.emplace_back(std::move(timers.front().cb));
+                    }
+                    std::pop_heap(timers.begin(), timers.end(), timer_compare_func);
+                    timers.pop_back();
+                } else {
+                    break;
+                }
+            }
+            for(auto& cb:runs) {
+                cb();
+            }
+            // cancel_slots 有时候会有冗余，比如删除已经执行过的timer
+            if (timers.empty()) {
+                cancel_slots.clear();
+            } else {
+                auto it = cancel_slots.upper_bound(timers.front().id);
+                cancel_slots.erase(cancel_slots.begin(), it);
+            }
 		}
 		void stop_timer() {
 			timers.clear();
+            cancel_slots.clear();
 		}
 		auto timer_get_seq() -> std::uint64_t {
 			for (;;) {
@@ -85,12 +97,10 @@ namespace shu {
             timers.push_back(timer_node{
                 .id = id, .cb = std::forward<func_t>(cb)
                 });
-            std::sort(timers.begin(), timers.end());
+            std::push_heap(timers.begin(), timers.end(), timer_compare_func);
 		}
 		auto timer_erase(sloop_timer_t_id id) -> void {
-            auto it = std::equal_range(timers.begin(), timers.end(), id);
-            if (it.first == it.second) return;
-            timers.erase(it.first, it.second);
+            cancel_slots.insert(id);
 		}
 	
         auto timer_wait_leatest() {
