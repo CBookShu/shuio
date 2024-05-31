@@ -11,7 +11,7 @@
 
 #include <algorithm>
 #include <ranges>
-#include <set>s
+#include <set>
 
 namespace shu {
     using namespace std::chrono;
