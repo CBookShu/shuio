@@ -199,19 +199,27 @@ static void test_f(F&& f) {
     std::cout << "cost " << std::chrono::duration_cast<std::chrono::milliseconds>(n2 - n1).count() << std::endl;
 }
 
-int main(int argc, char**argv)
-{
-    // loop_post();
+static void timer_test() {
     sloop l;
-    constexpr int count = 100000;
-    sloop_timer_t_id id;
     test_f([&](){
-        for(auto i = 0; i < count; ++i) {
-            id = l.add_timer([](){}, 1ms * i);
+        int value = 0;
+        for (int i = 0; i < 1000; ++i) {
+            auto id = l.add_timer([i, &value]() {
+                std::cout << i << std::endl;
+                value++;
+            }, std::chrono::milliseconds(1) * i);
+
+            if (i % 2 == 1) {
+                l.cancel_timer(id);
+            }
         }
     });
-
     l.run();
+}
+
+int main(int argc, char**argv)
+{
+    timer_test();
     return 0;
 }
 
