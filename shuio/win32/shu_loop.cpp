@@ -103,14 +103,12 @@ namespace shu {
             for(auto& cb:runs) {
                 cb();
             }
-            if(!runs.empty()) {
-                _set_timer(now);
-            }
+            _set_timer(now);
             // cancel_slots 有时候会有冗余，比如删除已经执行过的timer
             if (timers.empty()) {
                 cancel_slots.clear();
             } else {
-                auto it = cancel_slots.upper_bound(timers.front().id);
+                auto it = cancel_slots.lower_bound(timers.front().id);
                 cancel_slots.erase(cancel_slots.begin(), it);
             }
         }
