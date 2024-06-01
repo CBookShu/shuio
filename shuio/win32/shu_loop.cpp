@@ -48,7 +48,6 @@ namespace shu {
 
         std::jthread timer_thread;
         HANDLE win32_timer_handle = INVALID_HANDLE_VALUE;
-        std::atomic_bool stop = false;
 
         ~win32_timer() {
             if (win32_timer_handle != win32_timer_handle) {
@@ -78,8 +77,8 @@ namespace shu {
             }
             win32_timer_handle = ::CreateWaitableTimer(0, FALSE, 0);
             _set_timer(steady_clock::now(), true);
-            timer_thread = std::jthread([this, f = std::move(f)]() {
-                while (!stop) {
+            timer_thread = std::jthread([this, f = std::move(f)](const std::stop_token& token) {
+                while (!token.stop_requested()) {
                     if (::WaitForSingleObject(win32_timer_handle, INFINITE) == WAIT_OBJECT_0) {
                         f();
                     }
@@ -113,7 +112,7 @@ namespace shu {
             }
         }
         void stop_timer() {
-            stop = true;
+            timer_thread.request_stop();
             LARGE_INTEGER timeout;
             timeout.QuadPart = 1;
             ::SetWaitableTimer(win32_timer_handle, &timeout, 1, 0, 0, FALSE);
