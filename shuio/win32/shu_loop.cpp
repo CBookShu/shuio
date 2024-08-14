@@ -50,7 +50,7 @@ namespace shu {
         HANDLE win32_timer_handle = INVALID_HANDLE_VALUE;
 
         ~win32_timer() {
-            if (win32_timer_handle != win32_timer_handle) {
+            if (win32_timer_handle != INVALID_HANDLE_VALUE) {
                 CloseHandle(win32_timer_handle);
             }
         }

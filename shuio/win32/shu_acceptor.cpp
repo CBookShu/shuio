@@ -85,7 +85,6 @@ namespace shu {
 
 			int last_erro = 1;
 			accept_ops.resize(max_acceptor_post);
-			int doing_count = 0;
 			for (auto& op:accept_ops) {
 				last_erro = post_acceptor(&op);
 				if (last_erro <= 0) {

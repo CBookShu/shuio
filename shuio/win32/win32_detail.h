@@ -19,9 +19,9 @@ namespace shu {
 	static_assert(sizeof(ULONG_PTR) == sizeof(void*));
 	using iocp_task_union = std::variant<iocp_timer_t, iocp_stop_t, iocp_wake_t, iocp_socket_t>;
 
-	constexpr iocp_task_union tag_timer = iocp_task_union{ iocp_timer_t {} };
-	constexpr iocp_task_union tag_stop = iocp_task_union{ iocp_stop_t {} };
-	constexpr iocp_task_union tag_wake = iocp_task_union{ iocp_wake_t {} };
+	const iocp_task_union tag_timer = iocp_task_union{ iocp_timer_t {} };
+	const iocp_task_union tag_stop = iocp_task_union{ iocp_stop_t {} };
+	const iocp_task_union tag_wake = iocp_task_union{ iocp_wake_t {} };
 
 	typedef struct iocp_navite_t {
 		HANDLE iocp;

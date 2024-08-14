@@ -77,12 +77,12 @@ namespace shu {
     }G_wsa_initor;
 
 
-    auto shu::navite_cast_loop(sloop* s) -> iocp_navite_t*
+    auto navite_cast_loop(sloop* s) -> iocp_navite_t*
     {
         return reinterpret_cast<iocp_navite_t*>(s->handle());
     }
 
-    auto shu::navite_cast_ssocket(ssocket* s) -> fd_navite_t*
+    auto navite_cast_ssocket(ssocket* s) -> fd_navite_t*
     {
         return reinterpret_cast<fd_navite_t*>(s->handle());
     }

@@ -10,7 +10,7 @@
 
 namespace shu {
 
-    struct sclient::sclient_t : public std::enable_shared_from_this<sclient::sclient_t> {
+    struct sclient::sclient_t {
         sloop* loop_;
         sclient* owner_;
         std::unique_ptr<ssocket> sock_;
@@ -74,6 +74,8 @@ namespace shu {
             if (!r) {
                 auto err = s_last_error();
                 if (err != ERROR_IO_PENDING) {
+                    sock_.reset();      // 返回错误，代表未注册iocp 成功，就直接关闭
+                    
                     socket_io_result res{ .res = -err };
                     cb_ctx_.evConn(res, nullptr, addr_pair_);
                     return res.res;
@@ -85,9 +87,8 @@ namespace shu {
 				entry.lpCompletionKey = reinterpret_cast<ULONG_PTR>(&navite_sock->tag);
 				entry.lpOverlapped = &connector_;
 				run(&entry);
-				return true;
             }
-            return true;
+            return 1;
         }
 
         void run(OVERLAPPED_ENTRY* entry) {
@@ -113,12 +114,12 @@ namespace shu {
             }
 
             if(sock_) {
-                // 需要关闭调用
                 auto* navite_sock = navite_cast_ssocket(sock_.get());
                 ::CancelIoEx(reinterpret_cast<HANDLE>(navite_sock->s), &connector_);
-                sock_->close();
+            } else {
+                // sock_ 为空，无iocp注册，直接close
+                post_to_close();
             }
-            post_to_close();
         }
     };
 
