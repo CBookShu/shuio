@@ -75,6 +75,8 @@ namespace shu {
                 }
             }
 
+            // sock 要被外部接手，之前的注册要注销掉
+            util_loop_register::unregister_loop(loop_, sock_.get());
             cb_ctx_.evConn(res, std::move(sock_), addr_pair_);
 
             if(stop_) {
